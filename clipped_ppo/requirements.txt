@@ -1,0 +1,7 @@
+tensorflow
+black
+tf-agents[reverb]
+pyvirtualdisplay
+pyglet
+imageio==2.4.0
+jupyterlab

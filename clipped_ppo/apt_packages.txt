@@ -1,0 +1,3 @@
+xvfb 
+ffmpeg 
+freeglut3-dev

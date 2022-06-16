@@ -1,0 +1,4 @@
+To install the apt packages run:
+
+sudo xargs apt-get install -y <apt_packages.txt
+
