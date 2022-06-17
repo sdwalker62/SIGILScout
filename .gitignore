@@ -1,0 +1,4 @@
+yolov5/
+results/
+wandb/
+.ipynb_checkpoints/
