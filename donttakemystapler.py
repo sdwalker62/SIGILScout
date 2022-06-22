@@ -3,7 +3,7 @@ from gym_unity.envs import UnityToGymWrapper
 
 from ddqn import ddqn
 
-env_dir = "/Users/andrewromans/Dev/UnityProjects/DontTakeMyStapler/DontTakeMyStapler"
+env_dir = "/Users/dalton/Documents/Work/AI-ML/SIGILScout/DontTakeMyStapler/DontTakeMyStapler"
 
 unity_env = UnityEnvironment(env_dir, worker_id=0, base_port=5004)
 env = UnityToGymWrapper(unity_env, uint8_visual=True)
