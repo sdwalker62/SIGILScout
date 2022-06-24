@@ -81,17 +81,71 @@ colors = {
 
 class BoundaryDetector(contactListener):
     def __init__(self, env):
+        # print('Boundary Detector initiated')
         contactListener.__init__(self)
         self.env = env
 
-    def begin_contact(self, contact):
-        pass
+    def BeginContact(self, contact):
+        # print('begin contact')
+        # f_A = contact.fixtureA
+        # f_B = contact.fixtureB
+        # print(f_A)
+        # print(f_B)
+        self._contact(contact, True)
 
-    def end_contact(self, contact):
-        pass
+    def EndContact(self, contact):
+        # print('end contact')
+        self._contact(contact, False)
 
-    def contact(self, contact, begin):
-        pass
+    def _contact(self, contact, begin):
+        # print('contact!')
+        # tile = None
+        # obj = None
+        u1 = contact.fixtureA.body.userData
+        u2 = contact.fixtureB.body.userData
+        if u2 is not None:
+            if "group" in u2.__dict__.keys() and u2.__dict__["group"] == "border":
+                print("Out of bounds!")
+        # if u2 is not None:
+        #     if "group" in u2.__dict__.keys() and u2.__dict__["group"] == "border":
+        #         if u1 is not None:
+        #             if "group" in u1.__dict__.keys() and u1.__dict__["group"] != "traversable_area":
+        #                 self.env.hit_obstacle = True
+
+        # if u2 is not None:
+        #     if "group" in u2.__dict__.keys() and u2.__dict__["group"] == "obstacle":
+        #         if u1 is not None:
+        #             if "group" in u1.__dict__.keys() and u1.__dict__["group"] != "traversable_area":
+        #                 self.env.hit_obstacle = True
+        # if u1 and "road_friction" in u1.__dict__:
+        #     tile = u1
+        #     obj = u2
+        # if u2 and "road_friction" in u2.__dict__:
+        #     tile = u2
+        #     obj = u1
+        # if not tile:
+        #     return
+
+        # inherit tile color from env
+        # tile.color = self.env.road_color / 255
+        # if not obj or "tiles" not in obj.__dict__:
+        #     return
+        # if begin:
+        #     obj.tiles.add(tile)
+        #     if not tile.road_visited:
+        #         tile.road_visited = True
+        #         self.env.reward += 1000.0 / len(self.env.track)
+        #         self.env.tile_visited_count += 1
+        #
+        #         # Lap is considered completed if enough % of the track was covered
+        #         if (
+        #             tile.idx == 0
+        #             and self.env.tile_visited_count / len(self.env.track)
+        #             > self.lap_complete_percent
+        #         ):
+        #             self.env.new_lap = True
+        # else:
+        #     obj.tiles.remove(tile)
 
 
 class SimulateSIGILExplorer(gym.Env, EzPickle):
@@ -143,7 +197,10 @@ class SimulateSIGILExplorer(gym.Env, EzPickle):
         self.boundaryDetector = BoundaryDetector(self)
         self.render_mode = render_mode
         self.surface = None
-        self.renderer = Renderer(self.render_mode, self.render)
+        self.renderer = Renderer(self.render_mode, self._render)
+        self.observation_space = spaces.Box(
+            low=0, high=255, shape=(STATE_H, STATE_W, 3), dtype=np.uint8
+        )
         self.t = 0.0
         self.is_open = True
 
@@ -153,6 +210,8 @@ class SimulateSIGILExplorer(gym.Env, EzPickle):
         self.clock = None
         self.agent = None
         self.verbose = verbose
+
+        self.hit_obstacle = False
 
         self.reward = 0.0
         self.prev_reward = 0.0
@@ -173,6 +232,10 @@ class SimulateSIGILExplorer(gym.Env, EzPickle):
             dtype=np.uint8,
         )
 
+        self.tile = fixtureDef(
+            shape=polygonShape(vertices=[(0, 0), (1, 0), (1, -1), (0, -1)])
+        )
+
         self.agent_color = colors["red"]
         self.objective_color = colors["green"]
         self.obstacle_color = colors["red"]
@@ -182,26 +245,27 @@ class SimulateSIGILExplorer(gym.Env, EzPickle):
         self.arena = list()
         self.arena_poly = list()
         self.traversable_tile_color = colors["opal"]
-        # self.n_arena_rows = 10
-        # self.n_arena_cols = 10
-        # self.bg_tile_width = 1.0
-        # self.bg_tile_height = 1.0
-        # self.arena_width = self.n_arena_cols * self.bg_tile_width
-        # self.arena_height = self.n_arena_rows * self.bg_tile_height
-        self.arena_width = 10
-        self.arena_height = 10
+        self.arena_width = 100
+        self.arena_height = 100
 
         # border
         self.border = list()
+        self.border_sensor = list()
+        self.border_sensor_poly = list()
         self.border_poly = list()
         self.border_color = colors["tart_orange"]
         self.border_width = 0.1
 
         # car
-        self.car = None
+        self.car = Car(self.world, 0.0, 0.5 * self.arena_width, 0.5 * self.arena_height)
+        
+        # obstacles
+        self.obstacles = list()
+        self.obstacles_poly = list()
+        self.square_size = 5
 
-    def destroy(self) -> None:
-        pass
+    def _destroy(self) -> None:
+        self.car.destroy()
 
     def build_course(self) -> None:
         """Builds the arena in which the agent operates."""
@@ -220,14 +284,14 @@ class SimulateSIGILExplorer(gym.Env, EzPickle):
             (0, self.arena_height),
         ]
         self.arena_poly.append(vertices)
-
-        fixture = fixtureDef(shape=polygonShape(vertices=vertices))
-        tile = self.world.CreateStaticBody(fixtures=fixture)
+        self.tile.shape.vertices = vertices
+        tile = self.world.CreateStaticBody(fixtures=self.tile)
 
         tile.userData = tile
         tile.color = self.objective_color
         tile.road_visited = False
         tile.road_friction = 1.0
+        # tile.group = "traversable_area"
         tile.idx = 0
         tile.fixtures[0].sensor = True
         self.arena.append(tile)
@@ -279,12 +343,58 @@ class SimulateSIGILExplorer(gym.Env, EzPickle):
         ]
         self.border_poly.append(bottom_border_vertices)
 
+        # for v in self.border_poly:
+        #     fixture = fixtureDef(shape=polygonShape(vertices=v))
+        #     tile = self.world.CreateStaticBody(fixtures=fixture)
+        #     tile.userData = tile
+        #     tile.group = "border"
+        #     tile.idx = 1
+        #     tile.color = self.border_color
+        #     tile.fixtures[0].sensor = True
+        #     self.border_sensor.append(tile)
+
         for v in self.border_poly:
             fixture = fixtureDef(shape=polygonShape(vertices=v))
             tile = self.world.CreateStaticBody(fixtures=fixture)
             tile.userData = tile
+            tile.group = "border"
+            tile.idx = 1
             tile.color = self.border_color
-            tile.fixtures[0].sensor = True
+            tile.fixtures[0].sensor = False
+            self.border.append(tile)
+
+    def spawn_square(self, init_x, init_y):
+        size = self.square_size
+        return [
+            (init_x, init_y),
+            (init_x + size, init_y),
+            (init_x + size, init_y + size),
+            (init_x, init_y + size)
+        ]
+
+    def build_obstacles(self) -> None:
+        n_obstacles = np.random.randint(0, 10)
+        list_obs = ["square", "rectangle", "L-shape", "boomerang"]
+        y_vals = [self.arena_height*0.1*i for i in range(10)]
+
+        for idx in range(n_obstacles):
+            o = np.choose(1, list_obs)
+            o = "square"
+            if o == "square":
+                y_init = y_vals[idx]
+                x_init = np.random.rand() * self.arena_width
+                v = self.spawn_square(x_init, y_init)
+                self.obstacles_poly.append(v)
+
+        for v in self.obstacles_poly:
+            # fixture = fixtureDef(shape=polygonShape(vertices=v))
+            self.tile.shape.vertices = v
+            tile = self.world.CreateStaticBody(fixtures=self.tile)
+            tile.userData = tile
+            # tile.idx = 1
+            # tile.group = "obstacle"
+            tile.color = self.objective_color
+            tile.fixtures[0].sensor = False
             self.border.append(tile)
 
     def step(self, action: Union[np.ndarray, int]) -> Tuple[ObsType, float, bool, dict]:
@@ -304,12 +414,18 @@ class SimulateSIGILExplorer(gym.Env, EzPickle):
                 does not influence the evaluation of the agent's performance.
 
         """
+
+        step_reward = 0
+        done = False
+        info = {}
+
         if action is not None:
             if self.continuous:
                 self.car.steer(-action[0])
                 self.car.gas(action[1])
                 self.car.brake(action[2])
             else:
+                print("THIS IS DISCRETE!")
                 if not self.action_space.contains(action):
                     raise InvalidAction(
                         f"you passed the invalid action `{action}`. "
@@ -323,9 +439,15 @@ class SimulateSIGILExplorer(gym.Env, EzPickle):
         self.world.Step(1.0 / FPS, 6 * 30, 2 * 30)
         self.t += 1.0 / FPS
 
-        self.state = self.render("single_state_pixels")
+        if self.hit_obstacle:
+            step_reward = -100
+            done = True
+            self.hit_obstacle = False
+
+        self.state = self._render("single_state_pixels")
+
         self.renderer.render_step()
-        return self.state, 0, False, None
+        return self.state, step_reward, done, info
 
     def render(
         self, mode: str = "human"
@@ -363,44 +485,43 @@ class SimulateSIGILExplorer(gym.Env, EzPickle):
         if self.render_mode is not None:
             return self.renderer.get_renders()
         else:
-            if self.screen is None and mode == "human":
-                pygame.init()
-                pygame.display.init()
-                self.screen = pygame.display.set_mode((WINDOW_W, WINDOW_H))
+            return self._render(mode)
 
-            pygame.font.init()
+    def _render(self, mode: str = "human"):
+        assert mode in self.metadata["render_modes"]
+        if self.screen is None and mode == "human":
+            pygame.init()
+            pygame.display.init()
+            self.screen = pygame.display.set_mode((WINDOW_W, WINDOW_H))
 
-            if self.clock is None:
-                self.clock = pygame.time.Clock()
+        pygame.font.init()
 
-            self.surface = pygame.Surface((WINDOW_W, WINDOW_H))
+        if self.clock is None:
+            self.clock = pygame.time.Clock()
 
-            angle = 0.0
-            zoom = 75.0
-            scroll_x = -WINDOW_W / 2 + 120
-            scroll_y = -WINDOW_H / 4 + 20
-            trans = pygame.math.Vector2((scroll_x, scroll_y)).rotate_rad(angle)
-            trans = (WINDOW_W / 2 + trans[0], WINDOW_H / 4 + trans[1])
+        self.surface = pygame.Surface((WINDOW_W, WINDOW_H))
 
-            # builders
-            self.build_course()
-            self.build_border()
+        angle = -self.car.hull.angle
+        zoom = 0.1 * SCALE * max(1 - self.t, 0) + ZOOM * SCALE * min(self.t, 1)
+        scroll_x = -(self.car.hull.position[0]) * zoom
+        scroll_y = -(self.car.hull.position[1]) * zoom
+        trans = pygame.math.Vector2((scroll_x, scroll_y)).rotate_rad(angle)
+        trans = (WINDOW_W / 2 + trans[0], WINDOW_H / 4 + trans[1])
 
-            # render background
-            self.render_background(zoom, trans, angle)
+        # render background
+        self.render_background(zoom, trans, angle)
 
-            # render arena
-            self.render_arena(zoom, trans, angle)
+        # render arena
+        self.render_arena(zoom, trans, angle)
 
-            # render border
-            self.render_border(zoom, trans, angle)
+        # render car
+        self.render_car(zoom, trans, angle, self.render_mode)
 
-            # render obstacles
-            self.render_obstacles(zoom, trans, angle)
+        # render border
+        self.render_border(zoom, trans, angle)
 
-            # render car
-            self.car = Car(self.world, 0.0, 6.0, 6.0)
-            self.render_car(zoom, trans, angle, self.render_mode)
+        # render obstacles
+        self.render_obstacles(zoom, trans, angle)
 
         if mode == "human":
             pygame.event.pump()
@@ -461,9 +582,14 @@ class SimulateSIGILExplorer(gym.Env, EzPickle):
             )
 
     def render_obstacles(self, zoom, translation, angle) -> None:
-        pass
-        # poly = [(4, 2), (5, 2), (4, 3), (5, 3)]
-        # self.draw_colored_polygon(poly, self.obstacle_color, zoom, translation, angle)
+        for poly in self.obstacles_poly:
+            self.draw_colored_polygon(
+                poly,
+                self.obstacle_color,
+                zoom,
+                translation,
+                angle,
+            )
 
     def render_car(self, zoom, translation, angle, mode) -> None:
         self.car.draw(
@@ -510,6 +636,7 @@ class SimulateSIGILExplorer(gym.Env, EzPickle):
 
     def reset(
         self,
+        *,
         seed: Optional[int] = None,
         return_info: bool = False,
         options: Optional[dict] = None,
@@ -535,8 +662,19 @@ class SimulateSIGILExplorer(gym.Env, EzPickle):
                 the ``info`` returned by :meth:`step`.
 
         """
-        self.arena = list()
-        self.arena_poly = list()
+        self._destroy()
+        self.obstacles = list()
+        self.obstacles_poly = list()
+        self.car = Car(self.world, 0.0, 0.5 * self.arena_width, 0.5 * self.arena_height)
+
+        self.build_course()
+        self.build_border()
+        self.build_obstacles()
+
+        self.renderer.reset()
+
+        self.hit_obstacle = False
+
 
     def close(self) -> None:
         """Perform any necessary cleanup. Environments will automatically :meth:`close()`
@@ -556,25 +694,34 @@ if __name__ == "__main__":
         for event in pygame.event.get():
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_LEFT:
+                    # print('KEY DOWN LEFT')
                     a[0] = -1.0
                 if event.key == pygame.K_RIGHT:
+                    # print("KEY DOWN RIGHT")
                     a[0] = +1.0
                 if event.key == pygame.K_UP:
+                    # print("KEY DOWN UP")
                     a[1] = +1.0
                 if event.key == pygame.K_DOWN:
+                    # print('KEY DOWN DOWN')
                     a[2] = +0.8  # set 1.0 for wheels to block to zero rotation
                 if event.key == pygame.K_RETURN:
+                    # print("KEY DOWN RETURN")
                     global restart
                     restart = True
 
             if event.type == pygame.KEYUP:
                 if event.key == pygame.K_LEFT:
+                    # print("KEY UP LEFT")
                     a[0] = 0
                 if event.key == pygame.K_RIGHT:
+                    # print("KEY UP RIGHT")
                     a[0] = 0
                 if event.key == pygame.K_UP:
+                    # print("KEY UP UP")
                     a[1] = 0
                 if event.key == pygame.K_DOWN:
+                    # print("KEY UP DOWN")
                     a[2] = 0
 
     env = SimulateSIGILExplorer()
@@ -589,13 +736,13 @@ if __name__ == "__main__":
         while True:
             register_input()
             s, r, done, info = env.step(a)
-            s = env.step(a)
-            # total_reward += r
+            # s = env.step(a)
+            total_reward += r
             if steps % 200 == 0:
                 print("\naction " + str([f"{x:+0.2f}" for x in a]))
                 print(f"step {steps} total_reward {total_reward:+0.2f}")
             steps += 1
             is_open = env.render()
-            if restart or is_open is False:
+            if done or restart or is_open is False:
                 break
     env.close()
