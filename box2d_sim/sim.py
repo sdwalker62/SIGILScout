@@ -75,7 +75,7 @@ colors = {
     "black": (0, 0, 0),
     "grey": (40, 40, 40),
     "opal": (198, 216, 211),
-    "tart_orange": (240, 84, 79)
+    "tart_orange": (240, 84, 79),
 }
 
 
@@ -134,10 +134,12 @@ class SimulateSIGILExplorer(gym.Env, EzPickle):
         render_mode: Optional[str] = None,
         verbose: bool = False,
         domain_random: bool = False,
+        continuous: bool = True,
     ) -> None:
         EzPickle.__init__(
             self
         )  # Un-pickles an object and passes args to its constructor
+        self.continuous = continuous
         self.boundaryDetector = BoundaryDetector(self)
         self.render_mode = render_mode
         self.surface = None
@@ -156,7 +158,14 @@ class SimulateSIGILExplorer(gym.Env, EzPickle):
         self.prev_reward = 0.0
         self.new_trial = False
         # do nothing, left, right, brake, gas
-        self.action_space = spaces.Discrete(5)
+        if self.continuous:
+            self.action_space = spaces.Box(
+                np.array([-1, 0, 0]).astype(np.float32),
+                np.array([+1, +1, +1]).astype(np.float32),
+            )  # steer, gas, brake
+        else:
+            self.action_space = spaces.Discrete(5)
+            # do nothing, left, right, gas, brake
         self.state_space = spaces.Box(
             low=0,
             high=25,
@@ -173,12 +182,14 @@ class SimulateSIGILExplorer(gym.Env, EzPickle):
         self.arena = list()
         self.arena_poly = list()
         self.traversable_tile_color = colors["opal"]
-        self.n_arena_rows = 10
-        self.n_arena_cols = 10
-        self.bg_tile_width = 1.0
-        self.bg_tile_height = 1.0
-        self.arena_width = self.n_arena_cols * self.bg_tile_width
-        self.arena_height = self.n_arena_rows * self.bg_tile_height
+        # self.n_arena_rows = 10
+        # self.n_arena_cols = 10
+        # self.bg_tile_width = 1.0
+        # self.bg_tile_height = 1.0
+        # self.arena_width = self.n_arena_cols * self.bg_tile_width
+        # self.arena_height = self.n_arena_rows * self.bg_tile_height
+        self.arena_width = 10
+        self.arena_height = 10
 
         # border
         self.border = list()
@@ -186,38 +197,40 @@ class SimulateSIGILExplorer(gym.Env, EzPickle):
         self.border_color = colors["tart_orange"]
         self.border_width = 0.1
 
+        # car
+        self.car = None
 
     def destroy(self) -> None:
         pass
 
     def build_course(self) -> None:
         """Builds the arena in which the agent operates."""
-        n_tiles = self.n_arena_cols * self.n_arena_rows
-        for i in range(n_tiles):
-            # p1 -- p2
-            # |     |
-            # p4 -- p3
 
-            row = math.floor(i / self.n_arena_rows)
-            col = i % self.n_arena_cols
+        # p1 -- p2
+        # |     |
+        # p4 -- p3
 
-            p1 = (row * self.bg_tile_height, col * self.bg_tile_width)
-            p2 = (p1[0] + self.bg_tile_width, p1[1])
-            p3 = (p1[0] + self.bg_tile_width, p1[1] + self.bg_tile_height)
-            p4 = (p1[0], p1[1] + self.bg_tile_height)
-            vertices = [p1, p2, p3, p4]
-            self.arena_poly.append(vertices)
+        # Since the traversable area can be a single texture we can improve performance
+        # by drawing one polygon instead of a mesh
 
-            fixture = fixtureDef(shape=polygonShape(vertices=vertices))
-            tile = self.world.CreateStaticBody(fixtures=fixture)
+        vertices = [
+            (0, 0),
+            (self.arena_width, 0),
+            (self.arena_width, self.arena_height),
+            (0, self.arena_height),
+        ]
+        self.arena_poly.append(vertices)
 
-            tile.userData = tile
-            tile.color = self.objective_color
-            tile.road_visited = False
-            tile.road_friction = 1.0
-            tile.idx = i
-            tile.fixtures[0].sensor = True
-            self.arena.append(tile)
+        fixture = fixtureDef(shape=polygonShape(vertices=vertices))
+        tile = self.world.CreateStaticBody(fixtures=fixture)
+
+        tile.userData = tile
+        tile.color = self.objective_color
+        tile.road_visited = False
+        tile.road_friction = 1.0
+        tile.idx = 0
+        tile.fixtures[0].sensor = True
+        self.arena.append(tile)
 
     def build_border(self) -> None:
         """Builds the arena border."""
@@ -226,37 +239,43 @@ class SimulateSIGILExplorer(gym.Env, EzPickle):
 
         # left border
         left_border_vertices = [
-            (-self.border_width, -self.border_width),                    # p1
-            (0, 0),                                                      # p2
-            (0, self.arena_height),                                      # p3
-            (-self.border_width, self.arena_height + self.border_width)  # p4
+            (-self.border_width, -self.border_width),  # p1
+            (0, 0),  # p2
+            (0, self.arena_height),  # p3
+            (-self.border_width, self.arena_height + self.border_width),  # p4
         ]
         self.border_poly.append(left_border_vertices)
 
-        # left border
+        # top border
         top_border_vertices = [
-            (-self.border_width, -self.border_width),                    # p1
+            (-self.border_width, -self.border_width),  # p1
             (self.arena_width + self.border_width, -self.border_width),  # p2
-            (self.arena_width, 0),                                       # p3
-            (0, 0)                                                       # p4
+            (self.arena_width, 0),  # p3
+            (0, 0),  # p4
         ]
         self.border_poly.append(top_border_vertices)
 
         # right border
         right_border_vertices = [
-            (self.arena_width, 0),                                                          # p1
-            (self.arena_width + self.border_width, -self.border_width),                     # p2
-            (self.arena_width + self.border_width, self.arena_height + self.border_width),  # p3
-            (self.arena_width, self.arena_height)                                                       # p4
+            (self.arena_width, 0),  # p1
+            (self.arena_width + self.border_width, -self.border_width),  # p2
+            (
+                self.arena_width + self.border_width,
+                self.arena_height + self.border_width,
+            ),  # p3
+            (self.arena_width, self.arena_height),  # p4
         ]
         self.border_poly.append(right_border_vertices)
 
         # bottom border
         bottom_border_vertices = [
-            (self.arena_width, self.arena_height),                                          # p1
-            (self.arena_width + self.border_width, self.arena_height + self.border_width),  # p2
-            (-self.border_width, self.arena_height + self.border_width),                    # p3
-            (0, self.arena_height)                                                          # p4
+            (self.arena_width, self.arena_height),  # p1
+            (
+                self.arena_width + self.border_width,
+                self.arena_height + self.border_width,
+            ),  # p2
+            (-self.border_width, self.arena_height + self.border_width),  # p3
+            (0, self.arena_height),  # p4
         ]
         self.border_poly.append(bottom_border_vertices)
 
@@ -268,7 +287,7 @@ class SimulateSIGILExplorer(gym.Env, EzPickle):
             tile.fixtures[0].sensor = True
             self.border.append(tile)
 
-    def step(self, action: ActType) -> Tuple[ObsType, float, bool, dict]:
+    def step(self, action: Union[np.ndarray, int]) -> Tuple[ObsType, float, bool, dict]:
         r"""Run one timestep of the environment's dynamics.
 
         Args:
@@ -285,8 +304,28 @@ class SimulateSIGILExplorer(gym.Env, EzPickle):
                 does not influence the evaluation of the agent's performance.
 
         """
+        if action is not None:
+            if self.continuous:
+                self.car.steer(-action[0])
+                self.car.gas(action[1])
+                self.car.brake(action[2])
+            else:
+                if not self.action_space.contains(action):
+                    raise InvalidAction(
+                        f"you passed the invalid action `{action}`. "
+                        f"The supported action_space is `{self.action_space}`"
+                    )
+                self.car.steer(-0.6 * (action == 1) + 0.6 * (action == 2))
+                self.car.gas(0.2 * (action == 3))
+                self.car.brake(0.8 * (action == 4))
+
+        self.car.step(1.0 / FPS)
         self.world.Step(1.0 / FPS, 6 * 30, 2 * 30)
         self.t += 1.0 / FPS
+
+        self.state = self.render("single_state_pixels")
+        self.renderer.render_step()
+        return self.state, 0, False, None
 
     def render(
         self, mode: str = "human"
@@ -359,6 +398,10 @@ class SimulateSIGILExplorer(gym.Env, EzPickle):
             # render obstacles
             self.render_obstacles(zoom, trans, angle)
 
+            # render car
+            self.car = Car(self.world, 0.0, 6.0, 6.0)
+            self.render_car(zoom, trans, angle, self.render_mode)
+
         if mode == "human":
             pygame.event.pump()
             self.clock.tick(self.metadata["render_fps"])
@@ -373,13 +416,13 @@ class SimulateSIGILExplorer(gym.Env, EzPickle):
         else:
             return self.is_open
 
-    def create_image_array(self, screen, size):
+    def create_image_array(self, screen, size) -> np.ndarray:
         scaled_screen = pygame.transform.smoothscale(screen, size)
         return np.transpose(
             np.array(pygame.surfarray.pixels3d(scaled_screen)), axes=(1, 0, 2)
         )
 
-    def render_background(self, zoom, translation, angle):
+    def render_background(self, zoom, translation, angle) -> None:
         bounds = PLAY_FIELD
         field = [
             (bounds, bounds),
@@ -397,7 +440,7 @@ class SimulateSIGILExplorer(gym.Env, EzPickle):
             clip=False,
         )
 
-    def render_arena(self, zoom, translation, angle):
+    def render_arena(self, zoom, translation, angle) -> None:
         for poly in self.arena_poly:
             self.draw_colored_polygon(
                 poly,
@@ -407,7 +450,7 @@ class SimulateSIGILExplorer(gym.Env, EzPickle):
                 angle,
             )
 
-    def render_border(self, zoom, translation, angle):
+    def render_border(self, zoom, translation, angle) -> None:
         for poly in self.border_poly:
             self.draw_colored_polygon(
                 poly,
@@ -417,26 +460,31 @@ class SimulateSIGILExplorer(gym.Env, EzPickle):
                 angle,
             )
 
-    def render_obstacles(self, zoom, translation, angle):
+    def render_obstacles(self, zoom, translation, angle) -> None:
+        pass
+        # poly = [(4, 2), (5, 2), (4, 3), (5, 3)]
+        # self.draw_colored_polygon(poly, self.obstacle_color, zoom, translation, angle)
 
-        poly = [
-            (4, 2),
-            (5, 2),
-            (4, 3),
-            (5, 3)
-        ]
-        self.draw_colored_polygon(
-            poly,
-            self.obstacle_color,
+    def render_car(self, zoom, translation, angle, mode) -> None:
+        self.car.draw(
+            self.surface,
             zoom,
             translation,
-            angle
+            angle,
+            mode not in ["state_pixels", "single_state_pixels"],
         )
 
     def draw_colored_polygon(
         self,
         poly: list,
-        poly_color: Union[Color, Color, Tuple[int, int, int], List[int], int, Tuple[int, int, int, int]],
+        poly_color: Union[
+            Color,
+            Color,
+            Tuple[int, int, int],
+            List[int],
+            int,
+            Tuple[int, int, int, int],
+        ],
         zoom: float,
         translation: pygame.math.Vector2,
         angle: float,
@@ -494,11 +542,14 @@ class SimulateSIGILExplorer(gym.Env, EzPickle):
         """Perform any necessary cleanup. Environments will automatically :meth:`close()`
         themselves when garbage collected or when the program exits.
         """
-        pass
+        if self.screen is not None:
+            pygame.display.quit()
+            self.is_open = False
+            pygame.quit()
 
 
 if __name__ == "__main__":
-    a = np.array([0.0] * 3)  # steer, accelerate, brake
+    a = np.array([0.0, 0.0, 0.0])  # steer, accelerate, brake
     import pygame
 
     def register_input():
@@ -531,14 +582,14 @@ if __name__ == "__main__":
 
     is_open = True
     while is_open:
-        # env.reset()
+        env.reset()
         total_reward = 0.0
         steps = 0
         restart = False
         while True:
             register_input()
-            # s, r, done, info = env.step(a)
-            env.step(a)
+            s, r, done, info = env.step(a)
+            s = env.step(a)
             # total_reward += r
             if steps % 200 == 0:
                 print("\naction " + str([f"{x:+0.2f}" for x in a]))
