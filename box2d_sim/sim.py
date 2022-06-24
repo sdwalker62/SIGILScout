@@ -51,7 +51,7 @@ WINDOW_W, WINDOW_H = 1000, 800
 SCALE = 6.0  # Track scale
 TRACK_RAD = 900 / SCALE  # Track is heavily morphed circle with this radius
 PLAY_FIELD = 2000 / SCALE  # Game over boundary
-FPS = 50  # Frames per second
+FPS = 60  # Frames per second
 ZOOM = 2.7  # Camera zoom
 ZOOM_FOLLOW = True  # Set to False for fixed view
 
@@ -70,21 +70,12 @@ colors = {
     # (R, G, B)
     "red": (255, 0, 0),
     "green": (0, 255, 0),
-    "blue": (0, 0, 255),
+    "oxford_blue": (0, 19, 61),
     "white": (255, 255, 255),
     "black": (0, 0, 0),
     "grey": (40, 40, 40),
-}
-
-metadata = {
-    "render_modes": [
-        "human",
-        "rgb_array",
-        "state_pixels",
-        "single_rgb_array",
-        "single_state_pixels",
-    ],
-    "render_fps": FPS,
+    "opal": (198, 216, 211),
+    "tart_orange": (240, 84, 79)
 }
 
 
@@ -127,6 +118,16 @@ class SimulateSIGILExplorer(gym.Env, EzPickle):
             - :attr:`np_random` - The random number generator for the environment
 
     """
+    metadata = {
+        "render_modes": [
+            "human",
+            "rgb_array",
+            "state_pixels",
+            "single_rgb_array",
+            "single_state_pixels",
+        ],
+        "render_fps": FPS,
+    }
 
     def __init__(
         self,
@@ -142,6 +143,7 @@ class SimulateSIGILExplorer(gym.Env, EzPickle):
         self.surface = None
         self.renderer = Renderer(self.render_mode, self.render)
         self.t = 0.0
+        self.is_open = True
 
         self.domain_random = domain_random
         self.world = Box2D.b2World((0, 0), contactListener=self.boundaryDetector)
@@ -149,8 +151,6 @@ class SimulateSIGILExplorer(gym.Env, EzPickle):
         self.clock = None
         self.agent = None
         self.verbose = verbose
-        self.arena = list()
-        self.arena_poly = list()
 
         self.reward = 0.0
         self.prev_reward = 0.0
@@ -164,45 +164,53 @@ class SimulateSIGILExplorer(gym.Env, EzPickle):
             dtype=np.uint8,
         )
 
-        self.traversable_tile_color = colors["black"]
         self.agent_color = colors["red"]
         self.objective_color = colors["green"]
-        self.obstacle_color = colors["blue"]
-        self.background_color = colors["grey"]
+        self.obstacle_color = colors["red"]
+        self.background_color = colors["oxford_blue"]
+
+        # background
+        self.arena = list()
+        self.arena_poly = list()
+        self.traversable_tile_color = colors["opal"]
+        self.n_arena_rows = 10
+        self.n_arena_cols = 10
+        self.bg_tile_width = 1.0
+        self.bg_tile_height = 1.0
+        self.arena_width = self.n_arena_cols * self.bg_tile_width
+        self.arena_height = self.n_arena_rows * self.bg_tile_height
+
+        # border
+        self.border = list()
+        self.border_poly = list()
+        self.border_color = colors["tart_orange"]
+        self.border_width = 0.1
+
 
     def destroy(self) -> None:
         pass
 
-    def build_course(self) -> bool:
-        r"""Builds the arena in which the agent operates.
-
-        Returns:
-
-        """
-        arena_width = 5
-        arena_height = 5
-        tile_width = 2.0
-        tile_height = 2.0
-        n_tiles = arena_width * arena_height
+    def build_course(self) -> None:
+        """Builds the arena in which the agent operates."""
+        n_tiles = self.n_arena_cols * self.n_arena_rows
         for i in range(n_tiles):
             # p1 -- p2
             # |     |
             # p4 -- p3
 
-            row = i / arena_height
-            col = i % arena_width
+            row = math.floor(i / self.n_arena_rows)
+            col = i % self.n_arena_cols
 
-            p1 = (row * tile_height, col * tile_width)
-            p2 = (p1[0] + tile_width, p1[1])
-            p3 = (p1[0] + tile_width, p1[1] + tile_height)
-            p4 = (p1[0], p1[1] + tile_height)
+            p1 = (row * self.bg_tile_height, col * self.bg_tile_width)
+            p2 = (p1[0] + self.bg_tile_width, p1[1])
+            p3 = (p1[0] + self.bg_tile_width, p1[1] + self.bg_tile_height)
+            p4 = (p1[0], p1[1] + self.bg_tile_height)
             vertices = [p1, p2, p3, p4]
-            print(vertices)
             self.arena_poly.append(vertices)
 
-            tile = self.world.CreateStaticBody(
-                fixtures=fixtureDef(shape=polygonShape(vertices=vertices))
-            )
+            fixture = fixtureDef(shape=polygonShape(vertices=vertices))
+            tile = self.world.CreateStaticBody(fixtures=fixture)
+
             tile.userData = tile
             tile.color = self.objective_color
             tile.road_visited = False
@@ -211,7 +219,54 @@ class SimulateSIGILExplorer(gym.Env, EzPickle):
             tile.fixtures[0].sensor = True
             self.arena.append(tile)
 
-        return True
+    def build_border(self) -> None:
+        """Builds the arena border."""
+
+        # The points go clockwise p1 -> p2 -> p3 -> p4
+
+        # left border
+        left_border_vertices = [
+            (-self.border_width, -self.border_width),                    # p1
+            (0, 0),                                                      # p2
+            (0, self.arena_height),                                      # p3
+            (-self.border_width, self.arena_height + self.border_width)  # p4
+        ]
+        self.border_poly.append(left_border_vertices)
+
+        # left border
+        top_border_vertices = [
+            (-self.border_width, -self.border_width),                    # p1
+            (self.arena_width + self.border_width, -self.border_width),  # p2
+            (self.arena_width, 0),                                       # p3
+            (0, 0)                                                       # p4
+        ]
+        self.border_poly.append(top_border_vertices)
+
+        # right border
+        right_border_vertices = [
+            (self.arena_width, 0),                                                          # p1
+            (self.arena_width + self.border_width, -self.border_width),                     # p2
+            (self.arena_width + self.border_width, self.arena_height + self.border_width),  # p3
+            (self.arena_width, self.arena_height)                                                       # p4
+        ]
+        self.border_poly.append(right_border_vertices)
+
+        # bottom border
+        bottom_border_vertices = [
+            (self.arena_width, self.arena_height),                                          # p1
+            (self.arena_width + self.border_width, self.arena_height + self.border_width),  # p2
+            (-self.border_width, self.arena_height + self.border_width),                    # p3
+            (0, self.arena_height)                                                          # p4
+        ]
+        self.border_poly.append(bottom_border_vertices)
+
+        for v in self.border_poly:
+            fixture = fixtureDef(shape=polygonShape(vertices=v))
+            tile = self.world.CreateStaticBody(fixtures=fixture)
+            tile.userData = tile
+            tile.color = self.border_color
+            tile.fixtures[0].sensor = True
+            self.border.append(tile)
 
     def step(self, action: ActType) -> Tuple[ObsType, float, bool, dict]:
         r"""Run one timestep of the environment's dynamics.
@@ -266,31 +321,63 @@ class SimulateSIGILExplorer(gym.Env, EzPickle):
 
 
         """
-        if self.screen is None and mode == "human":
-            pygame.init()
-            pygame.display.init()
-            self.screen = pygame.display.set_mode((WINDOW_W, WINDOW_H))
+        if self.render_mode is not None:
+            return self.renderer.get_renders()
+        else:
+            if self.screen is None and mode == "human":
+                pygame.init()
+                pygame.display.init()
+                self.screen = pygame.display.set_mode((WINDOW_W, WINDOW_H))
 
-        pygame.font.init()
+            pygame.font.init()
 
-        if self.clock is None:
-            self.clock = pygame.time.Clock()
+            if self.clock is None:
+                self.clock = pygame.time.Clock()
 
-        self.surface = pygame.Surface((WINDOW_W, WINDOW_H))
+            self.surface = pygame.Surface((WINDOW_W, WINDOW_H))
 
-        angle = 0.0
-        zoom = 0.1 * SCALE * max(1 - self.t, 0) + ZOOM * SCALE * min(self.t, 1)
-        scroll_x, scroll_y = 0.0, 0.0
-        trans = pygame.math.Vector2((scroll_x, scroll_y)).rotate_rad(angle)
-        trans = (WINDOW_W / 2 + trans[0], WINDOW_H / 4 + trans[1])
+            angle = 0.0
+            zoom = 75.0
+            scroll_x = -WINDOW_W / 2 + 120
+            scroll_y = -WINDOW_H / 4 + 20
+            trans = pygame.math.Vector2((scroll_x, scroll_y)).rotate_rad(angle)
+            trans = (WINDOW_W / 2 + trans[0], WINDOW_H / 4 + trans[1])
 
-        self.build_course()
+            # builders
+            self.build_course()
+            self.build_border()
 
-        # render background
-        self.render_background(zoom, trans, angle)
+            # render background
+            self.render_background(zoom, trans, angle)
 
-        # render arena
-        self.render_arena(zoom, trans, angle)
+            # render arena
+            self.render_arena(zoom, trans, angle)
+
+            # render border
+            self.render_border(zoom, trans, angle)
+
+            # render obstacles
+            self.render_obstacles(zoom, trans, angle)
+
+        if mode == "human":
+            pygame.event.pump()
+            self.clock.tick(self.metadata["render_fps"])
+            self.screen.fill(0)
+            self.screen.blit(self.surface, (0, 0))
+            pygame.display.flip()
+
+        if mode in {"rgb_array", "single_rgb_array"}:
+            return self.create_image_array(self.surface, (VIDEO_W, VIDEO_H))
+        elif mode in {"state_pixels", "single_state_pixels"}:
+            return self.create_image_array(self.surface, (STATE_W, STATE_H))
+        else:
+            return self.is_open
+
+    def create_image_array(self, screen, size):
+        scaled_screen = pygame.transform.smoothscale(screen, size)
+        return np.transpose(
+            np.array(pygame.surfarray.pixels3d(scaled_screen)), axes=(1, 0, 2)
+        )
 
     def render_background(self, zoom, translation, angle):
         bounds = PLAY_FIELD
@@ -319,6 +406,32 @@ class SimulateSIGILExplorer(gym.Env, EzPickle):
                 translation,
                 angle,
             )
+
+    def render_border(self, zoom, translation, angle):
+        for poly in self.border_poly:
+            self.draw_colored_polygon(
+                poly,
+                self.border_color,
+                zoom,
+                translation,
+                angle,
+            )
+
+    def render_obstacles(self, zoom, translation, angle):
+
+        poly = [
+            (4, 2),
+            (5, 2),
+            (4, 3),
+            (5, 3)
+        ]
+        self.draw_colored_polygon(
+            poly,
+            self.obstacle_color,
+            zoom,
+            translation,
+            angle
+        )
 
     def draw_colored_polygon(
         self,

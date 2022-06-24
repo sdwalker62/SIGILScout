@@ -2,7 +2,5 @@
 <project version="4">
   <component name="VcsDirectoryMappings">
     <mapping directory="$PROJECT_DIR$" vcs="Git" />
-    <mapping directory="$PROJECT_DIR$/box2d_sim/gym" vcs="Git" />
-    <mapping directory="$PROJECT_DIR$/gym_sim/gym" vcs="Git" />
   </component>
 </project>
