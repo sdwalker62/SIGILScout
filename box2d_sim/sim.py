@@ -76,6 +76,8 @@ colors = {
     "grey": (40, 40, 40),
     "opal": (198, 216, 211),
     "tart_orange": (240, 84, 79),
+    "sac_green": (14, 64, 45),
+    "emerald": (91, 186, 111)
 }
 
 
@@ -237,8 +239,8 @@ class SimulateSIGILExplorer(gym.Env, EzPickle):
         )
 
         self.agent_color = colors["red"]
-        self.objective_color = colors["green"]
-        self.obstacle_color = colors["red"]
+        self.objective_color = colors["emerald"]
+        self.obstacle_color = colors["black"]
         self.background_color = colors["oxford_blue"]
 
         # background
@@ -260,9 +262,21 @@ class SimulateSIGILExplorer(gym.Env, EzPickle):
         self.car = Car(self.world, 0.0, 0.5 * self.arena_width, 0.5 * self.arena_height)
         
         # obstacles
+        self.min_obstacle_count = 10
+        self.max_obstacle_count = 15
+        self.obstacle_angles = list()
         self.obstacles = list()
         self.obstacles_poly = list()
         self.square_size = 5
+        self.base_1 = 3
+        self.base_2 = 5
+
+        self.x_anchor_gen = self.halton_sequence(self.base_1)
+        self.y_anchor_gen = self.halton_sequence(self.base_2)
+
+        # goal
+        self.goal_poly = list()
+        self.goal = list()
 
     def _destroy(self) -> None:
         self.car.destroy()
@@ -363,39 +377,147 @@ class SimulateSIGILExplorer(gym.Env, EzPickle):
             tile.fixtures[0].sensor = False
             self.border.append(tile)
 
-    def spawn_square(self, init_x, init_y):
+    def spawn_square(self, anchor_x, anchor_y):
         size = self.square_size
         return [
-            (init_x, init_y),
-            (init_x + size, init_y),
-            (init_x + size, init_y + size),
-            (init_x, init_y + size)
+            (anchor_x, anchor_y),
+            (anchor_x + size, anchor_y),
+            (anchor_x + size, anchor_y + size),
+            (anchor_x, anchor_y + size)
         ]
 
-    def build_obstacles(self) -> None:
-        n_obstacles = np.random.randint(0, 10)
-        list_obs = ["square", "rectangle", "L-shape", "boomerang"]
-        y_vals = [self.arena_height*0.1*i for i in range(10)]
+    def spawn_rectangle(self, anchor_x, anchor_y):
+        size = self.square_size
+        return [
+            (anchor_x, anchor_y),
+            (anchor_x + 2 * size, anchor_y),
+            (anchor_x + 2 * size, anchor_y + size),
+            (anchor_x, anchor_y + size)
+        ]
 
-        for idx in range(n_obstacles):
-            o = np.choose(1, list_obs)
-            o = "square"
+    def spawn_bend(self, anchor_x, anchor_y):
+        size = self.square_size
+        return [
+            (anchor_x, anchor_y),
+            (anchor_x + 2 * size, anchor_y),
+            (anchor_x + 2 * size, anchor_y + 2 * size),
+            (anchor_x + size, anchor_y + 2 * size),
+            (anchor_x + size, anchor_y + size),
+            (anchor_x, anchor_y + size)
+        ]
+
+    @staticmethod
+    def halton_sequence(base):
+        """Returns a halton sequence for obstacle placement."""
+        n, d = 0, 1
+        while True:
+            x = d - n
+            if x == 1:
+                n = 1
+                d *= base
+            else:
+                y = d // base
+                while x <= y:
+                    y //= base
+                n = (base + 1) * y - x
+            yield n / d
+
+    @staticmethod
+    def rotate_obstacle(angle: float, vertices: list) -> List[Tuple]:
+        """Rotates the given list of polygon according to the supplied angle.
+
+        We expect an input list of polygons vertices, e.g. for a unit square rotated by 45 degrees:
+            vertices = [(0, 0), (1, 0), (1, 1), (0, 1)]
+
+        Turn this into a numpy array:
+            P = [0 1 1 0
+                 0 0 1 1]
+
+        Compute the centroid:
+            1 / 4 * [0 + [1 + [1 + [0  = [0.5
+                     0]   0]   1]   1]    0.5]
+
+        C = [0.5 0.5 0.5 0.5
+             0.5 0.5 0.5 0.5]
+
+        Form a rotation matrix:
+
+        R = [cos(angle) -sin(angle) = [0.7 -0.7
+             sin(angle) cos(angle)]    0.7 0.7]
+
+        rotated_poly = R X (P - C) + C = [0.7 -0.7 X [-0.5 0.5 0.5 -0.5 + [0.5 0.5 0.5 0.5
+                                          0.7 0.7]    -0.5 -0.5 0.5 0.5]   0.5 0.5 0.5 0.5]
+
+                                       = [0.0 0.7 0.0 -0.7 + [0.5 0.5 0.5 0.5 = [0.5 1.2 0.5 -0.5
+                                          -0.7 0.0 0.7 0.0]   0.5 0.5 0.5 0.5]  -0.2 0.5 1.2 0.5]
+
+        We then return the new vertices as a list:
+        new_vertices = [(0.5, -0.2), (1.2, 0.5), (0.5, 1.2), (-0.5, 0.5)]
+        """
+        n_vertices = len(vertices)
+        vertex_arr = np.zeros((2, n_vertices))
+        for p_idx in range(n_vertices):
+            vertex_arr[0, p_idx] = vertices[p_idx][0]
+            vertex_arr[1, p_idx] = vertices[p_idx][1]
+
+        centroid = 1 / n_vertices * np.sum(vertex_arr, axis=1)
+        c_array = np.array([[centroid[0]*n_vertices], [centroid[1]*n_vertices]])
+        r_array = np.array([[np.cos(angle), -np.sin(angle)], [np.sin(angle), np.cos(angle)]])
+        new_poly = r_array @ (vertex_arr - c_array) + c_array
+
+        # adjust the vertices to reposition back to the original anchors
+        adj_arr = new_poly.T[0] - vertex_arr.T[0]
+        new_poly = new_poly - np.expand_dims(adj_arr.T, axis=1)
+        rotated_poly = list()
+        for col in new_poly.T:
+            rotated_poly.append((col[0], col[1]))
+        return rotated_poly
+
+    def build_obstacles(self) -> None:
+        n_obstacles = np.random.randint(self.min_obstacle_count, self.max_obstacle_count)
+        self.obstacle_angles = list(np.random.rand(n_obstacles))
+        list_obs = ["square", "rectangle", "bend"]
+
+        for p_idx in range(n_obstacles):
+            o = np.random.choice(list_obs)
+            x_anchor = next(self.x_anchor_gen) * self.arena_width
+            y_anchor = next(self.y_anchor_gen) * self.arena_height
+            v = [(0, 0) * 4]
             if o == "square":
-                y_init = y_vals[idx]
-                x_init = np.random.rand() * self.arena_width
-                v = self.spawn_square(x_init, y_init)
-                self.obstacles_poly.append(v)
+                v = self.spawn_square(x_anchor, y_anchor)
+            elif o == "rectangle":
+                v = self.spawn_rectangle(x_anchor, y_anchor)
+            elif o == "bend":
+                v = self.spawn_bend(x_anchor, y_anchor)
+            v = self.rotate_obstacle(self.obstacle_angles[p_idx], v)
+            self.obstacles_poly.append(v)
 
         for v in self.obstacles_poly:
-            # fixture = fixtureDef(shape=polygonShape(vertices=v))
             self.tile.shape.vertices = v
             tile = self.world.CreateStaticBody(fixtures=self.tile)
             tile.userData = tile
-            # tile.idx = 1
-            # tile.group = "obstacle"
-            tile.color = self.objective_color
+            tile.group = "obstacle"
+            tile.color = self.obstacle_color
             tile.fixtures[0].sensor = False
             self.border.append(tile)
+
+    def build_goal(self):
+        anchor_x = next(self.x_anchor_gen) * self.arena_width
+        anchor_y = next(self.y_anchor_gen) * self.arena_height
+        v = [
+            (anchor_x, anchor_y),
+            (anchor_x + self.square_size * 0.4, anchor_y),
+            (anchor_x + self.square_size * 0.4, anchor_y + self.square_size * 0.2),
+            (anchor_x, anchor_y + self.square_size * 0.2)
+        ]
+        self.goal_poly.append(v)
+        self.tile.shape.vertices = v
+        tile = self.world.CreateStaticBody(fixtures=self.tile)
+        tile.userData = tile
+        tile.group = "goal"
+        tile.color = self.objective_color
+        tile.fixtures[0].sensor = False
+        self.goal.append(tile)
 
     def step(self, action: Union[np.ndarray, int]) -> Tuple[ObsType, float, bool, dict]:
         r"""Run one timestep of the environment's dynamics.
@@ -523,6 +645,9 @@ class SimulateSIGILExplorer(gym.Env, EzPickle):
         # render obstacles
         self.render_obstacles(zoom, trans, angle)
 
+        # render goal
+        self.render_goal(zoom, trans, angle)
+
         if mode == "human":
             pygame.event.pump()
             self.clock.tick(self.metadata["render_fps"])
@@ -586,6 +711,16 @@ class SimulateSIGILExplorer(gym.Env, EzPickle):
             self.draw_colored_polygon(
                 poly,
                 self.obstacle_color,
+                zoom,
+                translation,
+                angle,
+            )
+
+    def render_goal(self, zoom, translation, angle) -> None:
+        for poly in self.goal_poly:
+            self.draw_colored_polygon(
+                poly,
+                self.objective_color,
                 zoom,
                 translation,
                 angle,
@@ -670,6 +805,7 @@ class SimulateSIGILExplorer(gym.Env, EzPickle):
         self.build_course()
         self.build_border()
         self.build_obstacles()
+        self.build_goal()
 
         self.renderer.reset()
 
