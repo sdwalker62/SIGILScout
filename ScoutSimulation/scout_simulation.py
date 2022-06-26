@@ -4,6 +4,8 @@ from turtle import color
 from typing import Optional, Union
 
 import numpy as np
+import configparser
+import yaml
 
 import gym
 from gym import spaces
@@ -12,19 +14,27 @@ from gym.error import DependencyNotInstalled, InvalidAction
 from gym.utils import EzPickle
 from gym.utils.renderer import Renderer
 
+from utils.halton_sequence import halton_sequence
+from utils.geometry import rotate_obstacle
+from utils.contact_listeners import BoundaryDetector
+
+from env_objects.square_obstacle import SquareObstacle
+
+from scout import Scout
+
 try:
     import pygame
     from pygame import gfxdraw
 except ImportError:
     raise DependencyNotInstalled(
-        "pygame is not installed, run `pip install gym[box2d]`"
-    )
+        "pygame is not installed, run `pip install gym[box2d]`")
 
 try:
     import Box2D
     from Box2D.b2 import contactListener, fixtureDef, polygonShape
 except ImportError:
-    raise DependencyNotInstalled("box2D is not installed, run `pip install gym[box2d]`")
+    raise DependencyNotInstalled(
+        "box2D is not installed, run `pip install gym[box2d]`")
 
 from typing import (
     Any,
@@ -43,10 +53,15 @@ ActType = TypeVar("ActType")
 RenderFrame = TypeVar("RenderFrame")
 Color = TypeVar("Color")
 
+with open('config.yaml') as f:
+    cfg = yaml.load(f, Loader=yaml.FullLoader)
+
+sys_cfg = cfg['System']
+colors = cfg['Colors']
+
 STATE_W, STATE_H = 96, 96  # less than Atari 160x192
 VIDEO_W, VIDEO_H = 600, 400
 WINDOW_W, WINDOW_H = 1000, 800
-
 
 SCALE = 6.0  # Track scale
 TRACK_RAD = 900 / SCALE  # Track is heavily morphed circle with this radius
@@ -55,103 +70,18 @@ FPS = 60  # Frames per second
 ZOOM = 2.7  # Camera zoom
 ZOOM_FOLLOW = True  # Set to False for fixed view
 
-
 TRACK_DETAIL_STEP = 21 / SCALE
 TRACK_TURN_RATE = 0.31
 TRACK_WIDTH = 40 / SCALE
 BORDER = 8 / SCALE
 BORDER_MIN_COUNT = 4
 GRASS_DIM = PLAY_FIELD / 20.0
-MAX_SHAPE_DIM = (
-    max(GRASS_DIM, TRACK_WIDTH, TRACK_DETAIL_STEP) * math.sqrt(2) * ZOOM * SCALE
-)
-
-colors = {
-    # (R, G, B)
-    "red": (255, 0, 0),
-    "green": (0, 255, 0),
-    "oxford_blue": (0, 19, 61),
-    "white": (255, 255, 255),
-    "black": (0, 0, 0),
-    "grey": (40, 40, 40),
-    "opal": (198, 216, 211),
-    "tart_orange": (240, 84, 79),
-    "sac_green": (14, 64, 45),
-    "emerald": (91, 186, 111)
-}
+MAX_SHAPE_DIM = (max(GRASS_DIM, TRACK_WIDTH, TRACK_DETAIL_STEP) * math.sqrt(2) *
+                 ZOOM * SCALE)
 
 
-class BoundaryDetector(contactListener):
-    def __init__(self, env):
-        # print('Boundary Detector initiated')
-        contactListener.__init__(self)
-        self.env = env
-
-    def BeginContact(self, contact):
-        # print('begin contact')
-        # f_A = contact.fixtureA
-        # f_B = contact.fixtureB
-        # print(f_A)
-        # print(f_B)
-        self._contact(contact, True)
-
-    def EndContact(self, contact):
-        # print('end contact')
-        self._contact(contact, False)
-
-    def _contact(self, contact, begin):
-        # print('contact!')
-        # tile = None
-        # obj = None
-        u1 = contact.fixtureA.body.userData
-        u2 = contact.fixtureB.body.userData
-        if u2 is not None:
-            if "group" in u2.__dict__.keys() and u2.__dict__["group"] == "border":
-                print("Out of bounds!")
-        # if u2 is not None:
-        #     if "group" in u2.__dict__.keys() and u2.__dict__["group"] == "border":
-        #         if u1 is not None:
-        #             if "group" in u1.__dict__.keys() and u1.__dict__["group"] != "traversable_area":
-        #                 self.env.hit_obstacle = True
-
-        # if u2 is not None:
-        #     if "group" in u2.__dict__.keys() and u2.__dict__["group"] == "obstacle":
-        #         if u1 is not None:
-        #             if "group" in u1.__dict__.keys() and u1.__dict__["group"] != "traversable_area":
-        #                 self.env.hit_obstacle = True
-        # if u1 and "road_friction" in u1.__dict__:
-        #     tile = u1
-        #     obj = u2
-        # if u2 and "road_friction" in u2.__dict__:
-        #     tile = u2
-        #     obj = u1
-        # if not tile:
-        #     return
-
-        # inherit tile color from env
-        # tile.color = self.env.road_color / 255
-        # if not obj or "tiles" not in obj.__dict__:
-        #     return
-        # if begin:
-        #     obj.tiles.add(tile)
-        #     if not tile.road_visited:
-        #         tile.road_visited = True
-        #         self.env.reward += 1000.0 / len(self.env.track)
-        #         self.env.tile_visited_count += 1
-        #
-        #         # Lap is considered completed if enough % of the track was covered
-        #         if (
-        #             tile.idx == 0
-        #             and self.env.tile_visited_count / len(self.env.track)
-        #             > self.lap_complete_percent
-        #         ):
-        #             self.env.new_lap = True
-        # else:
-        #     obj.tiles.remove(tile)
-
-
-class SimulateSIGILExplorer(gym.Env, EzPickle):
-    r"""Creates a simulation of the SIGIL Explorer environment for learning purposes.
+class SIGILScout(gym.Env, EzPickle):
+    r"""Creates a simulation of the SIGIL Scout environment for learning purposes.
 
     Inherits from the gym.Env class which implements the following methods and attributes:
 
@@ -193,21 +123,22 @@ class SimulateSIGILExplorer(gym.Env, EzPickle):
         continuous: bool = True,
     ) -> None:
         EzPickle.__init__(
-            self
-        )  # Un-pickles an object and passes args to its constructor
+            self)  # Un-pickles an object and passes args to its constructor
         self.continuous = continuous
         self.boundaryDetector = BoundaryDetector(self)
         self.render_mode = render_mode
         self.surface = None
         self.renderer = Renderer(self.render_mode, self._render)
-        self.observation_space = spaces.Box(
-            low=0, high=255, shape=(STATE_H, STATE_W, 3), dtype=np.uint8
-        )
+        self.observation_space = spaces.Box(low=0,
+                                            high=255,
+                                            shape=(STATE_H, STATE_W, 3),
+                                            dtype=np.uint8)
         self.t = 0.0
         self.is_open = True
 
         self.domain_random = domain_random
-        self.world = Box2D.b2World((0, 0), contactListener=self.boundaryDetector)
+        self.world = Box2D.b2World((0, 0),
+                                   contactListener=self.boundaryDetector)
         self.screen = None
         self.clock = None
         self.agent = None
@@ -234,9 +165,8 @@ class SimulateSIGILExplorer(gym.Env, EzPickle):
             dtype=np.uint8,
         )
 
-        self.tile = fixtureDef(
-            shape=polygonShape(vertices=[(0, 0), (1, 0), (1, -1), (0, -1)])
-        )
+        self.tile = fixtureDef(shape=polygonShape(
+            vertices=[(0, 0), (1, 0), (1, -1), (0, -1)]))
 
         self.agent_color = colors["red"]
         self.objective_color = colors["emerald"]
@@ -258,9 +188,10 @@ class SimulateSIGILExplorer(gym.Env, EzPickle):
         self.border_color = colors["tart_orange"]
         self.border_width = 0.1
 
-        # car
-        self.car = Car(self.world, 0.0, 0.5 * self.arena_width, 0.5 * self.arena_height)
-        
+        # scout
+        self.agent = Scout(self.world, 0.0, 0.5 * self.arena_width,
+                            0.5 * self.arena_height)
+
         # obstacles
         self.min_obstacle_count = 10
         self.max_obstacle_count = 15
@@ -271,15 +202,16 @@ class SimulateSIGILExplorer(gym.Env, EzPickle):
         self.base_1 = 3
         self.base_2 = 5
 
-        self.x_anchor_gen = self.halton_sequence(self.base_1)
-        self.y_anchor_gen = self.halton_sequence(self.base_2)
+        self.x_anchor_gen = halton_sequence(self.base_1)
+        self.y_anchor_gen = halton_sequence(self.base_2)
 
         # goal
         self.goal_poly = list()
         self.goal = list()
 
     def _destroy(self) -> None:
-        self.car.destroy()
+        pass
+        # self.car.destroy()
 
     def build_course(self) -> None:
         """Builds the arena in which the agent operates."""
@@ -377,119 +309,38 @@ class SimulateSIGILExplorer(gym.Env, EzPickle):
             tile.fixtures[0].sensor = False
             self.border.append(tile)
 
-    def spawn_square(self, anchor_x, anchor_y):
-        size = self.square_size
-        return [
-            (anchor_x, anchor_y),
-            (anchor_x + size, anchor_y),
-            (anchor_x + size, anchor_y + size),
-            (anchor_x, anchor_y + size)
-        ]
-
     def spawn_rectangle(self, anchor_x, anchor_y):
         size = self.square_size
-        return [
-            (anchor_x, anchor_y),
-            (anchor_x + 2 * size, anchor_y),
-            (anchor_x + 2 * size, anchor_y + size),
-            (anchor_x, anchor_y + size)
-        ]
+        return [(anchor_x, anchor_y), (anchor_x + 2 * size, anchor_y),
+                (anchor_x + 2 * size, anchor_y + size),
+                (anchor_x, anchor_y + size)]
 
     def spawn_bend(self, anchor_x, anchor_y):
         size = self.square_size
-        return [
-            (anchor_x, anchor_y),
-            (anchor_x + 2 * size, anchor_y),
-            (anchor_x + 2 * size, anchor_y + 2 * size),
-            (anchor_x + size, anchor_y + 2 * size),
-            (anchor_x + size, anchor_y + size),
-            (anchor_x, anchor_y + size)
-        ]
-
-    @staticmethod
-    def halton_sequence(base):
-        """Returns a halton sequence for obstacle placement."""
-        n, d = 0, 1
-        while True:
-            x = d - n
-            if x == 1:
-                n = 1
-                d *= base
-            else:
-                y = d // base
-                while x <= y:
-                    y //= base
-                n = (base + 1) * y - x
-            yield n / d
-
-    @staticmethod
-    def rotate_obstacle(angle: float, vertices: list) -> List[Tuple]:
-        """Rotates the given list of polygon according to the supplied angle.
-
-        We expect an input list of polygons vertices, e.g. for a unit square rotated by 45 degrees:
-            vertices = [(0, 0), (1, 0), (1, 1), (0, 1)]
-
-        Turn this into a numpy array:
-            P = [0 1 1 0
-                 0 0 1 1]
-
-        Compute the centroid:
-            1 / 4 * [0 + [1 + [1 + [0  = [0.5
-                     0]   0]   1]   1]    0.5]
-
-        C = [0.5 0.5 0.5 0.5
-             0.5 0.5 0.5 0.5]
-
-        Form a rotation matrix:
-
-        R = [cos(angle) -sin(angle) = [0.7 -0.7
-             sin(angle) cos(angle)]    0.7 0.7]
-
-        rotated_poly = R X (P - C) + C = [0.7 -0.7 X [-0.5 0.5 0.5 -0.5 + [0.5 0.5 0.5 0.5
-                                          0.7 0.7]    -0.5 -0.5 0.5 0.5]   0.5 0.5 0.5 0.5]
-
-                                       = [0.0 0.7 0.0 -0.7 + [0.5 0.5 0.5 0.5 = [0.5 1.2 0.5 -0.5
-                                          -0.7 0.0 0.7 0.0]   0.5 0.5 0.5 0.5]  -0.2 0.5 1.2 0.5]
-
-        We then return the new vertices as a list:
-        new_vertices = [(0.5, -0.2), (1.2, 0.5), (0.5, 1.2), (-0.5, 0.5)]
-        """
-        n_vertices = len(vertices)
-        vertex_arr = np.zeros((2, n_vertices))
-        for p_idx in range(n_vertices):
-            vertex_arr[0, p_idx] = vertices[p_idx][0]
-            vertex_arr[1, p_idx] = vertices[p_idx][1]
-
-        centroid = 1 / n_vertices * np.sum(vertex_arr, axis=1)
-        c_array = np.array([[centroid[0]*n_vertices], [centroid[1]*n_vertices]])
-        r_array = np.array([[np.cos(angle), -np.sin(angle)], [np.sin(angle), np.cos(angle)]])
-        new_poly = r_array @ (vertex_arr - c_array) + c_array
-
-        # adjust the vertices to reposition back to the original anchors
-        adj_arr = new_poly.T[0] - vertex_arr.T[0]
-        new_poly = new_poly - np.expand_dims(adj_arr.T, axis=1)
-        rotated_poly = list()
-        for col in new_poly.T:
-            rotated_poly.append((col[0], col[1]))
-        return rotated_poly
+        return [(anchor_x, anchor_y), (anchor_x + 2 * size, anchor_y),
+                (anchor_x + 2 * size, anchor_y + 2 * size),
+                (anchor_x + size, anchor_y + 2 * size),
+                (anchor_x + size, anchor_y + size), (anchor_x, anchor_y + size)]
 
     def build_obstacles(self) -> None:
-        n_obstacles = np.random.randint(self.min_obstacle_count, self.max_obstacle_count)
+        n_obstacles = np.random.randint(self.min_obstacle_count,
+                                        self.max_obstacle_count)
         self.obstacle_angles = list(np.random.rand(n_obstacles))
         list_obs = ["square", "rectangle", "bend"]
+        square_1 = SquareObstacle(1)
 
         for p_idx in range(n_obstacles):
             o = np.random.choice(list_obs)
             x_anchor = next(self.x_anchor_gen) * self.arena_width
             y_anchor = next(self.y_anchor_gen) * self.arena_height
-            v = [(0, 0) * 4]
+            v = None
             if o == "square":
-                v = self.spawn_square(x_anchor, y_anchor)
+                v = square_1.get_vertices(x_anchor, y_anchor)
             elif o == "rectangle":
                 v = self.spawn_rectangle(x_anchor, y_anchor)
             elif o == "bend":
                 v = self.spawn_bend(x_anchor, y_anchor)
-            v = self.rotate_obstacle(self.obstacle_angles[p_idx], v)
+            v = rotate_obstacle(self.obstacle_angles[p_idx], v)
             self.obstacles_poly.append(v)
 
         for v in self.obstacles_poly:
@@ -504,12 +355,11 @@ class SimulateSIGILExplorer(gym.Env, EzPickle):
     def build_goal(self):
         anchor_x = next(self.x_anchor_gen) * self.arena_width
         anchor_y = next(self.y_anchor_gen) * self.arena_height
-        v = [
-            (anchor_x, anchor_y),
-            (anchor_x + self.square_size * 0.4, anchor_y),
-            (anchor_x + self.square_size * 0.4, anchor_y + self.square_size * 0.2),
-            (anchor_x, anchor_y + self.square_size * 0.2)
-        ]
+        v = [(anchor_x, anchor_y),
+             (anchor_x + self.square_size * 0.4, anchor_y),
+             (anchor_x + self.square_size * 0.4,
+              anchor_y + self.square_size * 0.2),
+             (anchor_x, anchor_y + self.square_size * 0.2)]
         self.goal_poly.append(v)
         self.tile.shape.vertices = v
         tile = self.world.CreateStaticBody(fixtures=self.tile)
@@ -519,7 +369,9 @@ class SimulateSIGILExplorer(gym.Env, EzPickle):
         tile.fixtures[0].sensor = False
         self.goal.append(tile)
 
-    def step(self, action: Union[np.ndarray, int]) -> Tuple[ObsType, float, bool, dict]:
+    def step(
+            self, action: Union[np.ndarray,
+                                int]) -> Tuple[ObsType, float, bool, dict]:
         r"""Run one timestep of the environment's dynamics.
 
         Args:
@@ -541,23 +393,22 @@ class SimulateSIGILExplorer(gym.Env, EzPickle):
         done = False
         info = {}
 
-        if action is not None:
-            if self.continuous:
-                self.car.steer(-action[0])
-                self.car.gas(action[1])
-                self.car.brake(action[2])
-            else:
-                print("THIS IS DISCRETE!")
-                if not self.action_space.contains(action):
-                    raise InvalidAction(
-                        f"you passed the invalid action `{action}`. "
-                        f"The supported action_space is `{self.action_space}`"
-                    )
-                self.car.steer(-0.6 * (action == 1) + 0.6 * (action == 2))
-                self.car.gas(0.2 * (action == 3))
-                self.car.brake(0.8 * (action == 4))
-
-        self.car.step(1.0 / FPS)
+        # if action is not None:
+        #     if self.continuous:
+        #         self.car.steer(-action[0])
+        #         self.car.gas(action[1])
+        #         self.car.brake(action[2])
+        #     else:
+        #         print("THIS IS DISCRETE!")
+        #         if not self.action_space.contains(action):
+        #             raise InvalidAction(
+        #                 f"you passed the invalid action `{action}`. "
+        #                 f"The supported action_space is `{self.action_space}`")
+        #         self.car.steer(-0.6 * (action == 1) + 0.6 * (action == 2))
+        #         self.car.gas(0.2 * (action == 3))
+        #         self.car.brake(0.8 * (action == 4))
+        #
+        # self.car.step(1.0 / FPS)
         self.world.Step(1.0 / FPS, 6 * 30, 2 * 30)
         self.t += 1.0 / FPS
 
@@ -572,7 +423,8 @@ class SimulateSIGILExplorer(gym.Env, EzPickle):
         return self.state, step_reward, done, info
 
     def render(
-        self, mode: str = "human"
+            self,
+            mode: str = "human"
     ) -> Optional[Union[RenderFrame, List[RenderFrame]]]:
         r"""Compute the render frames as specified by render_mode attribute during initialization of the environment.
 
@@ -623,10 +475,10 @@ class SimulateSIGILExplorer(gym.Env, EzPickle):
 
         self.surface = pygame.Surface((WINDOW_W, WINDOW_H))
 
-        angle = -self.car.hull.angle
+        angle = -self.agent.body.angle
         zoom = 0.1 * SCALE * max(1 - self.t, 0) + ZOOM * SCALE * min(self.t, 1)
-        scroll_x = -(self.car.hull.position[0]) * zoom
-        scroll_y = -(self.car.hull.position[1]) * zoom
+        scroll_x = -(self.agent.body.position[0]) * zoom
+        scroll_y = -(self.agent.body.position[1]) * zoom
         trans = pygame.math.Vector2((scroll_x, scroll_y)).rotate_rad(angle)
         trans = (WINDOW_W / 2 + trans[0], WINDOW_H / 4 + trans[1])
 
@@ -664,9 +516,8 @@ class SimulateSIGILExplorer(gym.Env, EzPickle):
 
     def create_image_array(self, screen, size) -> np.ndarray:
         scaled_screen = pygame.transform.smoothscale(screen, size)
-        return np.transpose(
-            np.array(pygame.surfarray.pixels3d(scaled_screen)), axes=(1, 0, 2)
-        )
+        return np.transpose(np.array(pygame.surfarray.pixels3d(scaled_screen)),
+                            axes=(1, 0, 2))
 
     def render_background(self, zoom, translation, angle) -> None:
         bounds = PLAY_FIELD
@@ -727,25 +578,18 @@ class SimulateSIGILExplorer(gym.Env, EzPickle):
             )
 
     def render_car(self, zoom, translation, angle, mode) -> None:
-        self.car.draw(
+        self.agent.render(
             self.surface,
             zoom,
             translation,
-            angle,
-            mode not in ["state_pixels", "single_state_pixels"],
+            angle
         )
 
     def draw_colored_polygon(
         self,
         poly: list,
-        poly_color: Union[
-            Color,
-            Color,
-            Tuple[int, int, int],
-            List[int],
-            int,
-            Tuple[int, int, int, int],
-        ],
+        poly_color: Union[Color, Color, Tuple[int, int, int], List[int], int,
+                          Tuple[int, int, int, int],],
         zoom: float,
         translation: pygame.math.Vector2,
         angle: float,
@@ -753,19 +597,17 @@ class SimulateSIGILExplorer(gym.Env, EzPickle):
     ) -> None:
         """Creates a colored polygon"""
         poly = [pygame.math.Vector2(c).rotate_rad(angle) for c in poly]
-        poly = [
-            (c[0] * zoom + translation[0], c[1] * zoom + translation[1]) for c in poly
-        ]
+        poly = [(c[0] * zoom + translation[0], c[1] * zoom + translation[1])
+                for c in poly]
         # This checks if the polygon is out of bounds of the screen, and we skip drawing if so.
         # Instead of calculating exactly if the polygon and screen overlap,
         # we simply check if the polygon is in a larger bounding box whose dimension
         # is greater than the screen by MAX_SHAPE_DIM, which is the maximum
         # diagonal length of an environment object
         if not clip or any(
-            (-MAX_SHAPE_DIM <= coord[0] <= WINDOW_W + MAX_SHAPE_DIM)
-            and (-MAX_SHAPE_DIM <= coord[1] <= WINDOW_H + MAX_SHAPE_DIM)
-            for coord in poly
-        ):
+            (-MAX_SHAPE_DIM <= coord[0] <= WINDOW_W + MAX_SHAPE_DIM) and
+            (-MAX_SHAPE_DIM <= coord[1] <= WINDOW_H + MAX_SHAPE_DIM)
+                for coord in poly):
             gfxdraw.aapolygon(self.surface, poly, poly_color)
             gfxdraw.filled_polygon(self.surface, poly, poly_color)
 
@@ -800,7 +642,8 @@ class SimulateSIGILExplorer(gym.Env, EzPickle):
         self._destroy()
         self.obstacles = list()
         self.obstacles_poly = list()
-        self.car = Car(self.world, 0.0, 0.5 * self.arena_width, 0.5 * self.arena_height)
+        self.agent = Scout(self.world, 0.0, 0.5 * self.arena_width,
+                       0.5 * self.arena_height)
 
         self.build_course()
         self.build_border()
@@ -810,7 +653,6 @@ class SimulateSIGILExplorer(gym.Env, EzPickle):
         self.renderer.reset()
 
         self.hit_obstacle = False
-
 
     def close(self) -> None:
         """Perform any necessary cleanup. Environments will automatically :meth:`close()`
@@ -860,7 +702,7 @@ if __name__ == "__main__":
                     # print("KEY UP DOWN")
                     a[2] = 0
 
-    env = SimulateSIGILExplorer()
+    env = SIGILScout()
     env.render()
 
     is_open = True

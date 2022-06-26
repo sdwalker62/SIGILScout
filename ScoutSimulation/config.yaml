@@ -1,0 +1,25 @@
+System:
+  window_width: 1000
+  window_height: 800
+  video_width: 600
+  video_height: 400
+  state_width: 96
+  state_height: 96
+  fps: 60
+  zoom_follow: True
+
+Colors:
+  red: !!python/tuple [255, 0, 0]
+  green: !!python/tuple [0, 255, 0]
+  oxford_blue: !!python/tuple [0, 19, 61]
+  white: !!python/tuple [255, 255, 255]
+  black: !!python/tuple [0, 0, 0]
+  grey: !!python/tuple [40, 40, 40]
+  opal: !!python/tuple [198, 216, 211]
+  tart_orange: !!python/tuple [240, 84, 79]
+  sac_green: !!python/tuple [14, 64, 45]
+  emerald: !!python/tuple [91, 186, 111]
+
+Scout:
+  color: !!python/tuple [56, 4, 14]
+  size: 0.2
