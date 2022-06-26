@@ -190,7 +190,7 @@ class SIGILScout(gym.Env, EzPickle):
 
         # scout
         self.agent = Scout(self.world, 0.0, 0.5 * self.arena_width,
-                            0.5 * self.arena_height)
+                           0.5 * self.arena_height)
 
         # obstacles
         self.min_obstacle_count = 10
@@ -578,12 +578,7 @@ class SIGILScout(gym.Env, EzPickle):
             )
 
     def render_car(self, zoom, translation, angle, mode) -> None:
-        self.agent.render(
-            self.surface,
-            zoom,
-            translation,
-            angle
-        )
+        self.agent.render(self.surface, zoom, translation, angle)
 
     def draw_colored_polygon(
         self,
@@ -643,7 +638,7 @@ class SIGILScout(gym.Env, EzPickle):
         self.obstacles = list()
         self.obstacles_poly = list()
         self.agent = Scout(self.world, 0.0, 0.5 * self.arena_width,
-                       0.5 * self.arena_height)
+                           0.5 * self.arena_height)
 
         self.build_course()
         self.build_border()

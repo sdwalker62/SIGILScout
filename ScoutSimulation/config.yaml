@@ -21,5 +21,8 @@ Colors:
   emerald: !!python/tuple [91, 186, 111]
 
 Scout:
-  color: !!python/tuple [56, 4, 14]
-  size: 0.2
+  body_color: !!python/tuple [56, 4, 14]
+  wheel_color: !!python/tuple [30, 30, 30]
+  size: 0.02
+  body_width: 50
+  body_height: 100
