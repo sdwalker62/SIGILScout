@@ -9,8 +9,8 @@ from gym.error import DependencyNotInstalled
 import pygame.draw
 
 try:
-    from Box2D.b2 import fixtureDef, polygonShape, revoluteJointDef
-    from Box2D.b2 import collision
+    from Box2D.b2 import fixtureDef, polygonShape, revoluteJointDef, wheelJointDef, weldJointDef
+    from Box2D.b2 import rayCastOutput, rayCastInput, vec2
 except ImportError:
     raise DependencyNotInstalled(
         "box2D is not installed, run `pip install gym[box2d]`")
@@ -289,7 +289,7 @@ class Scout:
         #     0
         # )
 
-    print(something)
+        # print(something)
 
     def render(self, surface, zoom: float, translation, angle: float) -> None:
         for obj in self.render_list:

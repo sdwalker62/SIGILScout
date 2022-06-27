@@ -393,6 +393,8 @@ class SIGILScout(gym.Env, EzPickle):
         done = False
         info = {}
 
+        self.agent.lineAndAABB()
+
         if action is not None:
             if self.continuous:
                 self.agent.steer(action[0])
@@ -649,8 +651,6 @@ class SIGILScout(gym.Env, EzPickle):
         self.renderer.reset()
 
         self.hit_obstacle = False
-
-        self.agent.lineAndAABB()
 
     def close(self) -> None:
         """Perform any necessary cleanup. Environments will automatically :meth:`close()`
