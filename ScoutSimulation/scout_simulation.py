@@ -649,6 +649,8 @@ class SIGILScout(gym.Env, EzPickle):
 
         self.hit_obstacle = False
 
+        self.agent.lineAndAABB()
+
     def close(self) -> None:
         """Perform any necessary cleanup. Environments will automatically :meth:`close()`
         themselves when garbage collected or when the program exits.

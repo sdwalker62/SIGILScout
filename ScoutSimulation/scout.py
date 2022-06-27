@@ -10,9 +10,11 @@ import pygame.draw
 
 try:
     from Box2D.b2 import fixtureDef, polygonShape, revoluteJointDef
+    from Box2D.b2 import collision
 except ImportError:
     raise DependencyNotInstalled(
         "box2D is not installed, run `pip install gym[box2d]`")
+
 
 with open('config.yaml') as f:
     cfg = yaml.load(f, Loader=yaml.FullLoader)
@@ -106,6 +108,33 @@ class Scout:
     # def step(self, dt) -> None:
     #     for w in self.wheels:
     #         pass
+
+    def lineAndAABB(self):
+        # aabb = self.body.GetFixtureList()[0].GetAABB(int32 childIndex) <- const b2AABB&
+        # aabb.Contains(const b2AABB &aabb) <- returns a boolean
+        # aabb.RayCast(b2RayCastOutput *output, const b2RayCastInput &input) <- returns a boolean
+
+        # self.body.GetFixtureList()[0].GetShape() <- b2Shape*
+
+        #self.body.GetFixtureList()[0].GetShape().RayCast(
+            #b2RayCastOutput* output,
+            #const b2RayCastInput& input,
+            #const b2Transform transform,
+            #int32 childIndex,
+        #)
+
+    print("Sup Raycast!")
+
+    output = None
+    input = RayCastInput(self.body.GetPosition(), self.body.GetPosition() + (5, 5), 1)
+    something = self.body.GetFixtureList()[0].GetShape().RayCast(
+        output,
+        input,
+        self.body.GetTransform(),
+        0
+    )
+
+    print(something)
 
     def render(self, surface, zoom: float, translation, angle: float) -> None:
         for obj in self.render_list:
