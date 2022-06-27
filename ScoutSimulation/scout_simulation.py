@@ -393,22 +393,23 @@ class SIGILScout(gym.Env, EzPickle):
         done = False
         info = {}
 
-        # if action is not None:
-        #     if self.continuous:
-        #         self.car.steer(-action[0])
-        #         self.car.gas(action[1])
-        #         self.car.brake(action[2])
-        #     else:
-        #         print("THIS IS DISCRETE!")
-        #         if not self.action_space.contains(action):
-        #             raise InvalidAction(
-        #                 f"you passed the invalid action `{action}`. "
-        #                 f"The supported action_space is `{self.action_space}`")
-        #         self.car.steer(-0.6 * (action == 1) + 0.6 * (action == 2))
-        #         self.car.gas(0.2 * (action == 3))
-        #         self.car.brake(0.8 * (action == 4))
-        #
-        # self.car.step(1.0 / FPS)
+        if action is not None:
+            if self.continuous:
+                self.agent.steer(action[0])
+                self.agent.accelerate(action[1])
+                self.agent.decelerate(action[2])
+                self.agent.camera_spin(action[3])
+            else:
+                print("THIS IS DISCRETE!")
+                if not self.action_space.contains(action):
+                    raise InvalidAction(
+                        f"you passed the invalid action `{action}`. "
+                        f"The supported action_space is `{self.action_space}`")
+                # self.car.steer(-0.6 * (action == 1) + 0.6 * (action == 2))
+                self.agent.accelerate(0.2 * (action == 3))
+                self.agent.decelerate(0.8 * (action == 4))
+
+        self.agent.step(1.0 / FPS)
         self.world.Step(1.0 / FPS, 6 * 30, 2 * 30)
         self.t += 1.0 / FPS
 
@@ -662,18 +663,22 @@ class SIGILScout(gym.Env, EzPickle):
 
 
 if __name__ == "__main__":
-    a = np.array([0.0, 0.0, 0.0])  # steer, accelerate, brake
+    a = np.array([0.0, 0.0, 0.0, 0.0])  # steer, accelerate, brake
     import pygame
 
     def register_input():
         for event in pygame.event.get():
             if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_a:
+                    a[3] = -0.01
+                if event.key == pygame.K_d:
+                    a[3] = 0.01
                 if event.key == pygame.K_LEFT:
                     # print('KEY DOWN LEFT')
-                    a[0] = -1.0
+                    a[0] = -0.01
                 if event.key == pygame.K_RIGHT:
                     # print("KEY DOWN RIGHT")
-                    a[0] = +1.0
+                    a[0] = +0.01
                 if event.key == pygame.K_UP:
                     # print("KEY DOWN UP")
                     a[1] = +1.0

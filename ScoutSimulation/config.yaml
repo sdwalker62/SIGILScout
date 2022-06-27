@@ -24,5 +24,7 @@ Scout:
   body_color: !!python/tuple [56, 4, 14]
   wheel_color: !!python/tuple [30, 30, 30]
   size: 0.02
-  body_width: 50
+  body_width: 100
+  raycast_color: !!python/tuple [0, 0, 255]
   body_height: 100
+  sensor_array_color: !!python/tuple [0, 255, 0]

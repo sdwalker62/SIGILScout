@@ -33,10 +33,15 @@ class BoundaryDetector(contactListener):
         # obj = None
         u1 = contact.fixtureA.body.userData
         u2 = contact.fixtureB.body.userData
-        if u2 is not None:
-            if "group" in u2.__dict__.keys(
-            ) and u2.__dict__["group"] == "border":
-                print("Out of bounds!")
+        if u2 is not None and "group" in u2.__dict__.keys(
+        ) and u2.__dict__["group"] == "border":
+            print("Out of bounds!")
+        if u2 is not None and u1 is not None and "group" in u2.__dict__.keys(
+        ) and "group" in u1.__dict__.keys():
+            if (u1.__dict__["group"] == 'raycast' and
+                    u2.__dict__["group"] != 'agent' and
+                    u2.__dict__["group"] != 'raycast'):
+                print('hit!')
         # if u2 is not None:
         #     if "group" in u2.__dict__.keys() and u2.__dict__["group"] == "border":
         #         if u1 is not None:
