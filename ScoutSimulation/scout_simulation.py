@@ -58,6 +58,8 @@ with open('config.yaml') as f:
 
 sys_cfg = cfg['System']
 colors = cfg['Colors']
+scout_cfg = cfg['Scout']
+arena_cfg = cfg['Arena']
 
 STATE_W, STATE_H = 96, 96  # less than Atari 160x192
 VIDEO_W, VIDEO_H = 600, 400
@@ -236,7 +238,7 @@ class SIGILScout(gym.Env, EzPickle):
         tile.userData = tile
         tile.color = self.objective_color
         tile.road_visited = False
-        tile.road_friction = 1.0
+        tile.road_friction = arena_cfg['ground_friction']
         # tile.group = "traversable_area"
         tile.idx = 0
         tile.fixtures[0].sensor = True
@@ -392,15 +394,11 @@ class SIGILScout(gym.Env, EzPickle):
         step_reward = 0
         done = False
         info = {}
-
-        self.agent.lineAndAABB()
-
         if action is not None:
             if self.continuous:
                 self.agent.steer(action[0])
                 self.agent.accelerate(action[1])
-                self.agent.decelerate(action[2])
-                self.agent.camera_spin(action[3])
+                self.agent.camera_spin(action[2])
             else:
                 print("THIS IS DISCRETE!")
                 if not self.action_space.contains(action):
@@ -670,21 +668,28 @@ if __name__ == "__main__":
         for event in pygame.event.get():
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_a:
-                    a[3] = -0.01
+                    a[2] = -scout_cfg['camera_turn_speed']
+                    break
                 if event.key == pygame.K_d:
-                    a[3] = 0.01
+                    a[2] = scout_cfg['camera_turn_speed']
+                    break
                 if event.key == pygame.K_LEFT:
                     # print('KEY DOWN LEFT')
-                    a[0] = -0.01
+                    a[0] = -scout_cfg['turn_speed']
+                    break
                 if event.key == pygame.K_RIGHT:
                     # print("KEY DOWN RIGHT")
-                    a[0] = +0.01
+                    a[0] = scout_cfg['turn_speed']
+                    break
                 if event.key == pygame.K_UP:
                     # print("KEY DOWN UP")
-                    a[1] = +1.0
+                    a[1] = scout_cfg['acceleration_speed']
+                    break
                 if event.key == pygame.K_DOWN:
                     # print('KEY DOWN DOWN')
-                    a[2] = +0.8  # set 1.0 for wheels to block to zero rotation
+                    a[1] = -scout_cfg[
+                        'acceleration_speed']  # set 1.0 for wheels to block to zero rotation
+                    break
                 if event.key == pygame.K_RETURN:
                     # print("KEY DOWN RETURN")
                     global restart
@@ -702,6 +707,9 @@ if __name__ == "__main__":
                     a[1] = 0
                 if event.key == pygame.K_DOWN:
                     # print("KEY UP DOWN")
+                    a[1] = 0
+                    break
+                if event.key == pygame.K_a or event.key == pygame.K_d:
                     a[2] = 0
 
     env = SIGILScout()

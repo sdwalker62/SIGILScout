@@ -8,6 +8,9 @@ System:
   fps: 60
   zoom_follow: True
 
+Arena:
+  ground_friction: 1e-1
+
 Colors:
   red: !!python/tuple [255, 0, 0]
   green: !!python/tuple [0, 255, 0]
@@ -28,3 +31,10 @@ Scout:
   raycast_color: !!python/tuple [0, 0, 255]
   body_height: 100
   sensor_array_color: !!python/tuple [0, 255, 0]
+  body_density: !!python/float 1.0
+  wheel_density: !!python/float 1e0
+  sensor_array_density: !!python/float 1e-3
+  ray_density: !!python/float 1e-8
+  turn_speed: !!python/float 1
+  acceleration_speed: !!python/float 1e2
+  camera_turn_speed: !!python/float 5

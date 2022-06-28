@@ -57,7 +57,7 @@ class Scout:
                 fixtureDef(
                     shape=polygonShape(vertices=[(x * self.size, y * self.size)
                                                  for x, y in HEAD_POLY]),
-                    density=0.0,
+                    # density=cfg['sensor_array_density'],
                     categoryBits=0x0020,
                     maskBits=0x001,
                     restitution=0.0,
@@ -69,8 +69,8 @@ class Scout:
             fixtures=[
                 fixtureDef(shape=polygonShape(vertices=[(x * self.size,
                                                          y * self.size)
-                                                        for x, y in BODY_POLY]),
-                           density=1000.0)
+                                                        for x, y in BODY_POLY]))
+                # density=cfg['body_density'])
             ])
         self.raycast = self.world.CreateDynamicBody(
             position=(HEADPOS[0] * self.size, HEADPOS[1] * self.size),
@@ -81,30 +81,30 @@ class Scout:
                                                   0), (0.01,
                                                        0), (0.01,
                                                             10), (-0.01, 10)]),
-                    density=1e-10,
+                    # density=cfg['ray_density'],
                     categoryBits=0x0020,
                     maskBits=0x001,
-                    restitution=0.0,
+                    restitution=1e-11,
                 ),
                 fixtureDef(
                     shape=polygonShape(vertices=[(-0.01,
                                                   0), (0.01,
                                                        0), (-2, 10), (-1.99,
                                                                       10)]),
-                    density=1e-10,
+                    # density=cfg['ray_density'],
                     categoryBits=0x0020,
                     maskBits=0x001,
-                    restitution=0.0,
+                    restitution=1e-11,
                 ),
                 fixtureDef(
                     shape=polygonShape(vertices=[(-0.01,
                                                   0), (0.01, 0), (2,
                                                                   10), (1.99,
                                                                         10)]),
-                    density=1e-10,
+                    # density=cfg['ray_density'],
                     categoryBits=0x0020,
                     maskBits=0x001,
-                    restitution=0.0,
+                    restitution=1e-11,
                 )
             ],
         )
@@ -156,7 +156,7 @@ class Scout:
                 fixtures=fixtureDef(
                     shape=polygonShape(vertices=[(x * self.size, y * self.size)
                                                  for x, y in WHEEL_POLY]),
-                    density=0.1,
+                    # density=cfg['wheel_density'],
                     categoryBits=0x0020,
                     maskBits=0x001,
                     restitution=0.0,
@@ -176,7 +176,7 @@ class Scout:
                 localAnchorB=(0, 0),
                 enableMotor=True,
                 enableLimit=True,
-                maxMotorTorque=180 * 900 * self.size * self.size,
+                # maxMotorTorque=180 * 900 * self.size * self.size,
                 motorSpeed=0,
                 lowerAngle=-0.4,
                 upperAngle=+0.4,
@@ -190,106 +190,43 @@ class Scout:
         # self.render_list = [self.body] #+ [self.sensor_array]
 
     def accelerate(self, acc: float) -> None:
-        acc = np.clip(acc, 0, 1)
+        # if (acc <= 0.0):
+        #     acc = 0
         for w in self.wheels:
-            diff = acc - w.acc
-            w.acc += diff
+            w.acc = acc
 
     def camera_spin(self, acc: float) -> None:
-        self.sensor_array.angle += acc
-
-    def decelerate(self, d: float) -> None:
-        for w in self.wheels:
-            w.brake = d
+        diff = acc - self.sensor_array.angle
+        self.sensor_array.angle += diff
 
     def steer(self, s):
         """control: steer
 
         Args:
             s (-1..1): target position, it takes time to rotate steering wheel from side-to-side"""
-        self.wheels[0].steer = s
-        self.wheels[1].steer = s
+        for w in self.wheels:
+            if s < 0:
+                w.angle = -90
+            elif s > 0:
+                w.angle = 90
+            else:
+                w.angle = 0
 
     def step(self, dt) -> None:
         for w in self.wheels:
             # The Freenove car does not have wheels that swivel so we will
             # not bother animating them.
-
-            dir = np.sign(w.steer - w.joint.angle)
-            val = abs(w.steer - w.joint.angle)
-            w.joint.motorSpeed = dir * min(50.0 * val, 3.0)
-
-            # Force
-            forw = w.GetWorldVector((0, 1))
-            side = w.GetWorldVector((1, 0))
-            v = w.linearVelocity
-            vf = forw[0] * v[0] + forw[1] * v[1]  # forward speed
-            vs = side[0] * v[0] + side[1] * v[1]  # side speed
-            ENGINE_POWER = 100000000 * self.size * self.size
-            WHEEL_MOMENT_OF_INERTIA = 4000 * self.size * self.size
-            w.omega += (
-                    dt
-                    * ENGINE_POWER
-                    * w.acc
-                    / WHEEL_MOMENT_OF_INERTIA
-                    / (abs(w.omega) + 5.0)
-            )
-
-            # BRAKING LOGIC
-            if w.brake >= 0.9:
-                w.omega = 0
-            elif w.brake > 0:
-                BRAKE_FORCE = 15  # radians per second
-                direction = -np.sign(w.omega)
-                val = BRAKE_FORCE * w.brake
-                if abs(val) > abs(w.omega):
-                    val = abs(w.omega)  # low speed => same as = 0
-                w.omega += direction * val
-            w.phase += w.omega * dt
-
-            vr = w.omega * w.wheel_rad  # rotating wheel speed
-            f_force = -vf + vr  # force direction is direction of speed difference
-            p_force = -vs
-
-            w.omega -= dt * f_force * w.wheel_rad
-            w.ApplyForceToCenter(
-                (
-                    p_force * side[0] + f_force * forw[0],
-                    p_force * side[1] + f_force * forw[1],
-                ),
-                True,
-            )
-
-    def lineAndAABB(self):
-        # aabb = self.body.GetFixtureList()[0].GetAABB(int32 childIndex) <- const b2AABB&
-        # aabb.Contains(const b2AABB &aabb) <- returns a boolean
-        # aabb.RayCast(b2RayCastOutput *output, const b2RayCastInput &input) <- returns a boolean
-
-        # self.body.GetFixtureList()[0].GetShape() <- b2Shape*
-
-        #self.body.GetFixtureList()[0].GetShape().RayCast(
-        #b2RayCastOutput* output,
-        #const b2RayCastInput& input,
-        #const b2Transform transform,
-        #int32 childIndex,
-        #)
-        pass
-        # print("Sup Raycast!")
-
-        # output = None
-        # endPoint = vec2(0, 0) - vec2(0, -500)
-        # # input = rayCastInput.__init__.__code__.co_varnames
-        # # print(input)
-        # input = rayCastInput(p1=vec2(0,0), p2=endPoint, maxFraction=1.0)
-        # # print(input)
-        # something = self.body.fixtures[0].shape.RayCast(
-        #     output,
-        #     input,
-        #     self.body.transform,
-        #     0
-        # )
-
-        # print(something)
+            if w.acc == 0.0:
+                w.linearVelocity = vec2(0.0, 0.0)
+                self.body.linearVelocity = vec2(0.0, 0.0)
+            x_force = w.acc * np.cos(self.wheels[0].angle * np.pi / 180 -
+                                       0.5 * np.pi)
+            y_force = w.acc * np.sin(self.wheels[0].angle * np.pi / 180 -
+                                       0.5 * np.pi)
+            if self.wheels[0].angle == 0.0:
+                w.ApplyForceToCenter((0.0, y_force), True)
+            else:
+                w.ApplyForceToCenter((x_force, y_force), True)
 
     def render(self, surface, zoom: float, translation, angle: float) -> None:
         for obj in self.render_list:
