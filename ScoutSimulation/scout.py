@@ -39,7 +39,7 @@ WHEELPOS = [(-body_width, +80), (+body_width, +80), (-body_width, -80),
 
 wheel_height = 30
 wheel_width = 24
-engine_power = 100000000 * cfg['size']**2
+engine_power = 100000000 * cfg['size'] ** 2
 
 
 class Scout:
@@ -49,6 +49,8 @@ class Scout:
         self.world = world
         self.size = cfg['size']
         HEAD_POLY = [(-20, 10), (-20, -10), (20, 10), (20, -10)]
+        self.angle = init_angle
+        self.rotate_flag = False
         self.sensor_array = self.world.CreateDynamicBody(
             position=(init_x + HEADPOS[0] * self.size,
                       init_y + HEADPOS[1] * self.size),
@@ -186,7 +188,7 @@ class Scout:
             w.userData = w
             self.wheels.append(w)
         self.render_list = self.wheels + [self.body] + [self.sensor_array
-                                                       ] + [self.raycast]
+                                                        ] + [self.raycast]
         # self.render_list = [self.body] #+ [self.sensor_array]
 
     def accelerate(self, acc: float) -> None:
@@ -199,31 +201,53 @@ class Scout:
         diff = acc - self.sensor_array.angle
         self.sensor_array.angle += diff
 
-    def steer(self, s):
-        """control: steer
+    def steer(self, rot: int):
+        if rot < 0:
+            self.rotate_flag = True
+            self.angle -= np.pi / 2
+        elif rot > 0:
+            self.rotate_flag = True
+            self.angle += np.pi / 2
 
-        Args:
-            s (-1..1): target position, it takes time to rotate steering wheel from side-to-side"""
-        for w in self.wheels:
-            if s < 0:
-                w.angle = -90
-            elif s > 0:
-                w.angle = 90
-            else:
-                w.angle = 0
+        # for w in self.wheels:
+        #     if s < 0:
+        #         w.angle = -90
+        #     elif s > 0:
+        #         w.angle = 90
+        #     else:
+        #         w.angle = 0
 
     def step(self, dt) -> None:
+
+        if self.rotate_flag:
+            self.rotate_flag = False
+            old_angle = self.body.angle
+            new_angle = self.angle
+            diff_angle = new_angle - old_angle
+            print('==============')
+            print(f'Old Angle: {old_angle}')
+            print(f'New Angle: {new_angle}')
+            print(f'Delta Angle: {self.body.angle + diff_angle}')
+            # self.body.ApplyTorque(1e20 * diff_angle, False)
+            self.body.angle += diff_angle
+            self.sensor_array.angle += diff_angle
+            # for r in self.raycast:
+            #     r.angle += diff_angle
+            for w in self.wheels:
+                w.angle += diff_angle
+
         for w in self.wheels:
             # The Freenove car does not have wheels that swivel so we will
             # not bother animating them.
             if w.acc == 0.0:
                 w.linearVelocity = vec2(0.0, 0.0)
                 self.body.linearVelocity = vec2(0.0, 0.0)
-            x_force = w.acc * np.cos(self.wheels[0].angle * np.pi / 180 -
-                                       0.5 * np.pi)
-            y_force = w.acc * np.sin(self.wheels[0].angle * np.pi / 180 -
-                                       0.5 * np.pi)
-            if self.wheels[0].angle == 0.0:
+                self.sensor_array.linearVelocity = vec2(0.0, 0.0)
+                for r in self.raycast:
+                    r.linearVelocity = vec2(0.0, 0.0)
+            x_force = w.acc * np.cos(self.angle - 0.5 * np.pi)
+            y_force = w.acc * np.sin(self.angle - 0.5 * np.pi)
+            if self.angle == 0.0:
                 w.ApplyForceToCenter((0.0, y_force), True)
             else:
                 w.ApplyForceToCenter((x_force, y_force), True)
