@@ -3,13 +3,17 @@ import numpy as np
 import gym
 from tensorflow.keras.models import load_model
 
+# N, S, E, W
+# SR, SL
+# CR, CL
+
 class DDDQN(tf.keras.Model):
-    def __init__(self):
+    def __init__(self, env):
       super(DDDQN, self).__init__()
       self.d1 = tf.keras.layers.Dense(128, activation='relu')
       self.d2 = tf.keras.layers.Dense(128, activation='relu')
       self.v = tf.keras.layers.Dense(1, activation=None)
-      self.a = tf.keras.layers.Dense(env.action_space.n, activation=None)
+      self.a = tf.keras.layers.Dense(9, activation=None)
 
     def call(self, input_data):
       x = self.d1(input_data)
@@ -26,12 +30,12 @@ class DDDQN(tf.keras.Model):
       return a
 
 class exp_replay():
-    def __init__(self, buffer_size= 1000000):
+    def __init__(self, env, buffer_size= 1000000):
         self.buffer_size = buffer_size
-        self.state_mem = np.zeros((self.buffer_size, *(env.observation_space.shape)), dtype=np.float32)
+        self.state_mem = np.zeros((self.buffer_size, * (env.observation_space.shape)), dtype=np.float32)
         self.action_mem = np.zeros((self.buffer_size), dtype=np.int32)
         self.reward_mem = np.zeros((self.buffer_size), dtype=np.float32)
-        self.next_state_mem = np.zeros((self.buffer_size, *(env.observation_space.shape)), dtype=np.float32)
+        self.next_state_mem = np.zeros((self.buffer_size, * (env.observation_space.shape)), dtype=np.float32)
         self.done_mem = np.zeros((self.buffer_size), dtype=np.bool)
         self.pointer = 0
 
@@ -54,20 +58,19 @@ class exp_replay():
         dones = self.done_mem[batch]
         return states, actions, rewards, next_states, dones
 
-
-
 class agent():
-      def __init__(self, gamma=0.99, replace=100, lr=0.001):
+      def __init__(self, env, gamma=0.99, replace=100, lr=0.001):
+          self.env = env
           self.gamma = gamma
           self.epsilon = 1.0
           self.min_epsilon = 0.01
           self.epsilon_decay = 1e-3
           self.replace = replace
           self.trainstep = 0
-          self.memory = exp_replay()
+          self.memory = exp_replay(env)
           self.batch_size = 64
-          self.q_net = DDDQN()
-          self.target_net = DDDQN()
+          self.q_net = DDDQN(env)
+          self.target_net = DDDQN(env)
           opt = tf.keras.optimizers.Adam(learning_rate=lr)
           self.q_net.compile(loss='mse', optimizer=opt)
           self.target_net.compile(loss='mse', optimizer=opt)
@@ -75,8 +78,7 @@ class agent():
 
       def act(self, state):
           if np.random.rand() <= self.epsilon:
-              return np.random.choice([i for i in range(env.action_space.n)])
-
+              return np.random.choice([i for i in range(9)])
           else:
               actions = self.q_net.advantage(np.array([state]))
               action = np.argmax(actions)

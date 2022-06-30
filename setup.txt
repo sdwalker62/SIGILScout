@@ -1,0 +1,9 @@
+1) conda create -n UnityGym_Test python=3.9
+
+2) conda activate UnityGym_Test
+
+3) pip install gym gym-unity mlagents-envs
+
+pip install protobuf==3.20.1
+
+conda install -c conda-forge lxml
