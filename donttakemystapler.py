@@ -3,7 +3,7 @@ from gym_unity.envs import UnityToGymWrapper
 
 from ddqn import ddqn
 
-env_dir = "/Users/andrewromans/Dev/Work/SIGILScout/Simulation/DontTakeMyStapler"
+env_dir = "/Users/andrewromans/Dev/UnityProjects/DontTakeMyStapler/DontTakeMyStapler"
 
 unity_env = UnityEnvironment(env_dir, worker_id=0, base_port=5004)
 env = UnityToGymWrapper(unity_env, uint8_visual=True)
@@ -29,9 +29,9 @@ def parse_actions(action):
     return [0, 1, 2]
 
 # TESTING THE ENVIRONMENT
-for epoch in range(100):
+for epoch in range(30):
   epoch_rewards = 0
-  for episode in range(10):
+  for episode_step in range(10):
     inital_observation = env.reset()
     done = False
     episode_rewards = 0
@@ -42,9 +42,10 @@ for epoch in range(100):
       action = parse_actions(actor.act(inital_observation))
       # print(f"{obs} | {r} | {done}")
       episode_rewards += r
-    print(f"Total reward for episode {episode}: {episode_rewards}")
+    print(f"Total reward for episode {episode_step}: {episode_rewards}")
     epoch_rewards += episode_rewards
-  actor.train()
+  for train_step in range(10):
+    actor.train()
   print(f"Total reward this epoch {epoch}: {epoch_rewards}")
 
 actor.save_model()

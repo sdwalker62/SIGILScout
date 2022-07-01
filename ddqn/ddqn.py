@@ -11,7 +11,7 @@ class DDDQN(tf.keras.Model):
     def __init__(self, env):
       super(DDDQN, self).__init__()
       self.d1 = tf.keras.layers.Dense(128, activation='relu')
-      self.d2 = tf.keras.layers.Dense(128, activation='relu')
+      self.d2 = tf.keras.layers.Dense(256, activation='relu')
       self.v = tf.keras.layers.Dense(1, activation=None)
       self.a = tf.keras.layers.Dense(9, activation=None)
 
@@ -64,7 +64,7 @@ class agent():
           self.gamma = gamma
           self.epsilon = 1.0
           self.min_epsilon = 0.01
-          self.epsilon_decay = 1e-3
+          self.epsilon_decay = 1e-2
           self.replace = replace
           self.trainstep = 0
           self.memory = exp_replay(env)
