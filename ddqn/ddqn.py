@@ -59,12 +59,12 @@ class exp_replay():
         return states, actions, rewards, next_states, dones
 
 class agent():
-      def __init__(self, env, gamma=0.99, replace=100, lr=0.001):
+      def __init__(self, env, gamma=0.65, replace=100, lr=0.001):
           self.env = env
           self.gamma = gamma
           self.epsilon = 1.0
           self.min_epsilon = 0.01
-          self.epsilon_decay = 1e-2
+          self.epsilon_decay = 1e-5
           self.replace = replace
           self.trainstep = 0
           self.memory = exp_replay(env)
@@ -75,7 +75,6 @@ class agent():
           self.q_net.compile(loss='mse', optimizer=opt)
           self.target_net.compile(loss='mse', optimizer=opt)
 
-
       def act(self, state):
           if np.random.rand() <= self.epsilon:
               return np.random.choice([i for i in range(9)])
@@ -83,12 +82,9 @@ class agent():
               actions = self.q_net.advantage(np.array([state]))
               action = np.argmax(actions)
               return action
-
-
       
       def update_mem(self, state, action, reward, next_state, done):
           self.memory.add_exp(state, action, reward, next_state, done)
-
 
       def update_target(self):
           self.target_net.set_weights(self.q_net.get_weights())     
@@ -97,13 +93,13 @@ class agent():
           self.epsilon = self.epsilon - self.epsilon_decay if self.epsilon > self.min_epsilon else self.min_epsilon
           return self.epsilon
 
-          
       def train(self):
           if self.memory.pointer < self.batch_size:
              return 
           
           if self.trainstep % self.replace == 0:
              self.update_target()
+
           states, actions, rewards, next_states, dones = self.memory.sample_exp(self.batch_size)
           target = self.q_net.predict(states)
           next_state_val = self.target_net.predict(next_states)
@@ -116,13 +112,12 @@ class agent():
           self.trainstep += 1
 
       def save_model(self):
-          self.q_net.save("model.h5")
-          self.target_net.save("target_model.h5")
-
+          self.q_net.save_weights("./model_weights.h5")
+          self.target_net.save_weights("targetmodel_weights.h5")
 
       def load_model(self):
-          self.q_net = load_model("model.h5")
-          self.target_net = load_model("model.h5")
+          self.q_net = tf.load_weights("model_weights.h5")
+          self.target_net = tf.load_weights("targetmodel_weights.h5")
 
 
 

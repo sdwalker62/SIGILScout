@@ -1,5 +1,6 @@
 from mlagents_envs.environment import UnityEnvironment
 from gym_unity.envs import UnityToGymWrapper
+from tqdm import tqdm
 
 from ddqn import ddqn
 
@@ -29,22 +30,27 @@ def parse_actions(action):
     return [0, 1, 2]
 
 # TESTING THE ENVIRONMENT
-for epoch in range(30):
+for epoch in range(15):
   epoch_rewards = 0
   for episode_step in range(10):
-    inital_observation = env.reset()
+    obs = env.reset()
     done = False
     episode_rewards = 0
-    # STOP, F, B - STOP, R, L - STOP, Rc, Lc
-    action = parse_actions(actor.act(inital_observation))
+
+    action = actor.act(obs)
+    parsed_action = parse_actions(action)
+
     while not done:
-      obs, r, done, _ = env.step(action)
-      action = parse_actions(actor.act(inital_observation))
-      # print(f"{obs} | {r} | {done}")
+      prev_obs = obs
+      obs, r, done, _ = env.step(parsed_action)
+      actor.update_mem(prev_obs, action, r, obs, done)
+      action = actor.act(obs)
+      parsed_action = parse_actions(action)
       episode_rewards += r
+
     print(f"Total reward for episode {episode_step}: {episode_rewards}")
     epoch_rewards += episode_rewards
-  for train_step in range(10):
+  for train_step in tqdm(range(30)):
     actor.train()
   print(f"Total reward this epoch {epoch}: {epoch_rewards}")
 
