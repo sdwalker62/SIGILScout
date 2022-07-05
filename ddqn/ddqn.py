@@ -30,7 +30,7 @@ class DDDQN(tf.keras.Model):
       return a
 
 class exp_replay():
-    def __init__(self, env, buffer_size= 1000000):
+    def __init__(self, env, buffer_size= 500000):
         self.buffer_size = buffer_size
         self.state_mem = np.zeros((self.buffer_size, * (env.observation_space.shape)), dtype=np.float32)
         self.action_mem = np.zeros((self.buffer_size), dtype=np.int32)
@@ -59,16 +59,16 @@ class exp_replay():
         return states, actions, rewards, next_states, dones
 
 class agent():
-      def __init__(self, env, gamma=0.65, replace=100, lr=0.001):
+      def __init__(self, env, gamma=0.90, replace=100, lr=0.001):
           self.env = env
           self.gamma = gamma
           self.epsilon = 1.0
-          self.min_epsilon = 0.01
-          self.epsilon_decay = 1e-5
+          self.min_epsilon = 0.1
+          self.epsilon_decay = 1e-3
           self.replace = replace
           self.trainstep = 0
           self.memory = exp_replay(env)
-          self.batch_size = 64
+          self.batch_size = 128
           self.q_net = DDDQN(env)
           self.target_net = DDDQN(env)
           opt = tf.keras.optimizers.Adam(learning_rate=lr)

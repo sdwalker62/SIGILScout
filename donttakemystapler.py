@@ -7,7 +7,7 @@ from ddqn import ddqn
 env_dir = "/Users/andrewromans/Dev/UnityProjects/DontTakeMyStapler/DontTakeMyStapler"
 
 unity_env = UnityEnvironment(env_dir, worker_id=0, base_port=5004)
-env = UnityToGymWrapper(unity_env, uint8_visual=True)
+env = UnityToGymWrapper(unity_env)
 
 actor = ddqn.agent(env)
 
@@ -50,7 +50,7 @@ for epoch in range(15):
 
     print(f"Total reward for episode {episode_step}: {episode_rewards}")
     epoch_rewards += episode_rewards
-  for train_step in tqdm(range(30)):
+  for train_step in tqdm(range(25)):
     actor.train()
   print(f"Total reward this epoch {epoch}: {epoch_rewards}")
 
